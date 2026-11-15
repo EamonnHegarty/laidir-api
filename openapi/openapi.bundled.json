@@ -4,7 +4,7 @@
     "title": "Láidir API",
     "version": "0.1.0",
     "summary": "Backup and sync for the Láidir gym tracker.",
-    "description": "The contract between the Láidir app and its backend. **This file is the source of truth**:\nthe mobile app generates its typed client from `openapi.bundled.json`, and the API's own\ntypes are generated from it too.\n\nEntity schemas live in `schemas/v1/` as JSON Schema 2020-12 and are shared with the MCP server.\n\n## Conventions\n- IDs are client-generated lowercase UUIDs. Timestamps are ISO-8601 UTC with milliseconds.\n- The user is **always** the verified token's `sub`. No endpoint takes a user ID.\n- Errors are RFC 9457 `application/problem+json`.\n- Deletes are soft: set `deleted_at`. Tombstones sync like any other change.\n\n## Sync model (phase 3)\n- **Push**: the client sends whole items. Each write is conditional on `updated_at`\n  (last writer wins). A stale write is rejected with the server's current copy.\n- **Pull**: the server stamps every accepted write with its own clock (`synced_at`, not exposed).\n  Pull pages through changes in `synced_at` order from an opaque cursor, so a device with a\n  wrong clock can't make its changes invisible to other devices.\n\nOperations marked `x-laidir-status: planned` aren't implemented yet.\n",
+    "description": "The contract between the Láidir app and its backend. **This file is the source of truth**:\nthe mobile app generates its typed client from `openapi.bundled.json`, and the API's own\ntypes are generated from it too.\n\nEntity schemas live in `schemas/v1/` as JSON Schema 2020-12 and are shared with the MCP server.\n\n## Conventions\n- IDs are client-generated lowercase UUIDs. Timestamps are ISO-8601 UTC with milliseconds.\n- The user is **always** the verified token's `sub`. No endpoint takes a user ID.\n- Errors are RFC 9457 `application/problem+json`.\n- Deletes are soft: set `deleted_at`. Tombstones sync like any other change.\n- Deleting a `RoutineFolder`: tombstone the folder and push each of its routines with `folder_id`\n  removed. Readers treat a `folder_id` pointing to a missing or deleted folder as unfiled.\n- Built-in exercises (`exercise_id: builtin:<slug>`) come from the static catalogue in\n  `catalogue/v1/exercises.json`, not from this API.\n\n## Sync model (phase 3)\n- **Push**: the client sends whole items. Each write is conditional on `updated_at`\n  (last writer wins). A stale write is rejected with the server's current copy.\n- **Pull**: the server stamps every accepted write with its own clock (`synced_at`, not exposed).\n  Pull pages through changes in `synced_at` order from an opaque cursor, so a device with a\n  wrong clock can't make its changes invisible to other devices.\n\nOperations marked `x-laidir-status: planned` aren't implemented yet.\n",
     "license": {
       "name": "MIT",
       "identifier": "MIT"
@@ -385,6 +385,14 @@
           "notes": {
             "$ref": "#/components/schemas/Notes"
           },
+          "folder_id": {
+            "description": "The RoutineFolder this routine is filed in. Absent means unfiled. Readers must treat a folder_id that points to a missing or deleted folder as unfiled: sync isn't atomic across items.",
+            "$ref": "#/components/schemas/Uuid"
+          },
+          "sort_order": {
+            "description": "Position within its folder (or within unfiled routines).",
+            "$ref": "#/components/schemas/SortOrder"
+          },
           "exercises": {
             "description": "In the order they're performed.",
             "type": "array",
@@ -392,6 +400,53 @@
             "items": {
               "$ref": "#/components/schemas/RoutineExercise"
             }
+          }
+        }
+      },
+      "RoutineFolder": {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "$id": "https://raw.githubusercontent.com/EamonnHegarty/laidir-api/main/schemas/v1/RoutineFolder.json",
+        "title": "RoutineFolder",
+        "description": "A user-named group of routines, ordered by sort_order. Routines point at their folder with folder_id. Deleting a folder: tombstone the folder (deleted_at) and push each of its routines with folder_id removed. Readers treat a folder_id that points to a missing or deleted folder as unfiled, so a routine moved into a folder on another device at the same moment is never lost.",
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "id",
+          "type",
+          "schema_version",
+          "created_at",
+          "updated_at",
+          "deleted_at",
+          "name",
+          "sort_order"
+        ],
+        "properties": {
+          "id": {
+            "$ref": "#/components/schemas/Uuid"
+          },
+          "type": {
+            "const": "ROUTINE_FOLDER"
+          },
+          "schema_version": {
+            "const": 1
+          },
+          "created_at": {
+            "$ref": "#/components/schemas/Timestamp"
+          },
+          "updated_at": {
+            "$ref": "#/components/schemas/Timestamp"
+          },
+          "deleted_at": {
+            "$ref": "#/components/schemas/DeletedAt"
+          },
+          "name": {
+            "$ref": "#/components/schemas/Name"
+          },
+          "sort_order": {
+            "$ref": "#/components/schemas/SortOrder"
+          },
+          "notes": {
+            "$ref": "#/components/schemas/Notes"
           }
         }
       },
@@ -472,6 +527,9 @@
             "$ref": "#/components/schemas/Routine"
           },
           {
+            "$ref": "#/components/schemas/RoutineFolder"
+          },
+          {
             "$ref": "#/components/schemas/Workout"
           }
         ],
@@ -481,6 +539,7 @@
             "PROFILE": "#/components/schemas/Profile",
             "EXERCISE": "#/components/schemas/Exercise",
             "ROUTINE": "#/components/schemas/Routine",
+            "ROUTINE_FOLDER": "#/components/schemas/RoutineFolder",
             "WORKOUT": "#/components/schemas/Workout"
           }
         }
@@ -585,6 +644,7 @@
               "PROFILE",
               "EXERCISE",
               "ROUTINE",
+              "ROUTINE_FOLDER",
               "WORKOUT"
             ]
           },
@@ -720,6 +780,12 @@
       "Notes": {
         "type": "string",
         "maxLength": 2000
+      },
+      "SortOrder": {
+        "description": "Position in a user-ordered list, ascending. Leave gaps (e.g. steps of 1000) so a move rewrites one item. Ties sort by name, then created_at.",
+        "type": "integer",
+        "minimum": 0,
+        "maximum": 1000000000
       },
       "ExerciseRef": {
         "description": "Reference to an exercise: `builtin:<slug>` for the built-in catalogue, or the UUID of one of the user's custom exercises.",
