@@ -1,0 +1,31 @@
+{
+  "name": "laidir-api",
+  "version": "0.0.0",
+  "private": true,
+  "description": "Láidir REST API + MCP server (TypeScript, AWS Lambda)",
+  "license": "MIT",
+  "type": "module",
+  "packageManager": "pnpm@12.21.0",
+  "engines": {
+    "node": ">=24"
+  },
+  "devDependencies": {
+    "@eslint/js": "^10.0.1",
+    "@types/aws-lambda": "^8.10.164",
+    "@types/node": "^24.19.2",
+    "eslint": "^10.15.0",
+    "eslint-config-prettier": "^10.1.8",
+    "prettier": "^3.10.1",
+    "typescript": "~6.0.3",
+    "typescript-eslint": "^8.72.2",
+    "vitest": "^5.1.0"
+  },
+  "scripts": {
+    "format": "prettier --write .",
+    "format:check": "prettier --check .",
+    "lint": "eslint .",
+    "typecheck": "tsc",
+    "test": "vitest run",
+    "check": "pnpm format:check && pnpm lint && pnpm typecheck && pnpm test"
+  }
+}

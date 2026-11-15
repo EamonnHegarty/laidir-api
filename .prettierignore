@@ -1,0 +1,6 @@
+dist/
+coverage/
+.vitest/
+pnpm-lock.yaml
+src/generated/
+openapi/openapi.bundled.json
