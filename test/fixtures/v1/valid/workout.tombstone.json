@@ -1,0 +1,11 @@
+{
+  "id": "6b9d2e5a-4c73-4fa0-9c91-3e4d5f6a7b82",
+  "type": "WORKOUT",
+  "schema_version": 1,
+  "created_at": "2026-11-10T18:00:00.000Z",
+  "updated_at": "2026-11-15T09:00:00.000Z",
+  "deleted_at": "2026-11-15T09:00:00.000Z",
+  "name": "Deleted workout",
+  "started_at": "2026-11-10T18:00:00.000Z",
+  "exercises": []
+}
