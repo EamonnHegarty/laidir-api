@@ -40,6 +40,14 @@
     "notes": {
       "$ref": "common.json#/$defs/Notes"
     },
+    "folder_id": {
+      "description": "The RoutineFolder this routine is filed in. Absent means unfiled. Readers must treat a folder_id that points to a missing or deleted folder as unfiled: sync isn't atomic across items.",
+      "$ref": "common.json#/$defs/Uuid"
+    },
+    "sort_order": {
+      "description": "Position within its folder (or within unfiled routines).",
+      "$ref": "common.json#/$defs/SortOrder"
+    },
     "exercises": {
       "description": "In the order they're performed.",
       "type": "array",

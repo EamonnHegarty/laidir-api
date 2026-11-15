@@ -17,6 +17,7 @@ const ENTITY_SCHEMAS: Record<string, string> = {
   PROFILE: "Profile.json",
   EXERCISE: "Exercise.json",
   ROUTINE: "Routine.json",
+  ROUTINE_FOLDER: "RoutineFolder.json",
   WORKOUT: "Workout.json",
 };
 
@@ -60,6 +61,20 @@ describe("schemas/v1", () => {
     for (const file of Object.values(ENTITY_SCHEMAS)) {
       expect(ajv.getSchema(BASE + file), file).toBeDefined();
     }
+  });
+
+  it("matches the OpenAPI Entity discriminator and PushResult types", () => {
+    const spec = readJson(join(import.meta.dirname, "..", "openapi", "openapi.bundled.json")) as {
+      components: {
+        schemas: {
+          Entity: { discriminator: { mapping: Record<string, string> } };
+          PushResult: { properties: { type: { enum: string[] } } };
+        };
+      };
+    };
+    const types = Object.keys(ENTITY_SCHEMAS).sort();
+    expect(Object.keys(spec.components.schemas.Entity.discriminator.mapping).sort()).toEqual(types);
+    expect([...spec.components.schemas.PushResult.properties.type.enum].sort()).toEqual(types);
   });
 
   describe.each(fixtures("valid"))("accepts %s", (_name, item) => {

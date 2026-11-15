@@ -15,6 +15,10 @@ info:
     - The user is **always** the verified token's `sub`. No endpoint takes a user ID.
     - Errors are RFC 9457 `application/problem+json`.
     - Deletes are soft: set `deleted_at`. Tombstones sync like any other change.
+    - Deleting a `RoutineFolder`: tombstone the folder and push each of its routines with `folder_id`
+      removed. Readers treat a `folder_id` pointing to a missing or deleted folder as unfiled.
+    - Built-in exercises (`exercise_id: builtin:<slug>`) come from the static catalogue in
+      `catalogue/v1/exercises.json`, not from this API.
 
     ## Sync model (phase 3)
     - **Push**: the client sends whole items. Each write is conditional on `updated_at`
@@ -175,6 +179,8 @@ components:
       $ref: ../schemas/v1/Exercise.json
     Routine:
       $ref: ../schemas/v1/Routine.json
+    RoutineFolder:
+      $ref: ../schemas/v1/RoutineFolder.json
     Workout:
       $ref: ../schemas/v1/Workout.json
 
@@ -184,6 +190,7 @@ components:
         - $ref: "#/components/schemas/Profile"
         - $ref: "#/components/schemas/Exercise"
         - $ref: "#/components/schemas/Routine"
+        - $ref: "#/components/schemas/RoutineFolder"
         - $ref: "#/components/schemas/Workout"
       discriminator:
         propertyName: type
@@ -191,6 +198,7 @@ components:
           PROFILE: "#/components/schemas/Profile"
           EXERCISE: "#/components/schemas/Exercise"
           ROUTINE: "#/components/schemas/Routine"
+          ROUTINE_FOLDER: "#/components/schemas/RoutineFolder"
           WORKOUT: "#/components/schemas/Workout"
 
     Health:
@@ -255,7 +263,7 @@ components:
           type: string
         type:
           type: string
-          enum: [PROFILE, EXERCISE, ROUTINE, WORKOUT]
+          enum: [PROFILE, EXERCISE, ROUTINE, ROUTINE_FOLDER, WORKOUT]
         status:
           description: |
             `applied`: written. `stale`: the server has a newer `updated_at`; `current` is its copy.

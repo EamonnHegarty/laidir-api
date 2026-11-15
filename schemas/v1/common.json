@@ -79,6 +79,12 @@
       "minimum": 0,
       "maximum": 3600
     },
+    "SortOrder": {
+      "description": "Position in a user-ordered list, ascending. Leave gaps (e.g. steps of 1000) so a move rewrites one item. Ties sort by name, then created_at.",
+      "type": "integer",
+      "minimum": 0,
+      "maximum": 1000000000
+    },
     "SupersetGroup": {
       "description": "Exercises in the same workout or routine with the same group number form a superset.",
       "type": "integer",

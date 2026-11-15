@@ -139,8 +139,32 @@ export interface components {
       deleted_at: components["schemas"]["DeletedAt"];
       name: components["schemas"]["Name"];
       notes?: components["schemas"]["Notes"];
+      /** @description The RoutineFolder this routine is filed in. Absent means unfiled. Readers must treat a folder_id that points to a missing or deleted folder as unfiled: sync isn't atomic across items. */
+      folder_id?: components["schemas"]["Uuid"];
+      /** @description Position within its folder (or within unfiled routines). */
+      sort_order?: components["schemas"]["SortOrder"];
       /** @description In the order they're performed. */
       exercises: components["schemas"]["RoutineExercise"][];
+    };
+    /**
+     * RoutineFolder
+     * @description A user-named group of routines, ordered by sort_order. Routines point at their folder with folder_id. Deleting a folder: tombstone the folder (deleted_at) and push each of its routines with folder_id removed. Readers treat a folder_id that points to a missing or deleted folder as unfiled, so a routine moved into a folder on another device at the same moment is never lost.
+     */
+    RoutineFolder: {
+      id: components["schemas"]["Uuid"];
+      /**
+       * @description discriminator enum property added by openapi-typescript
+       * @enum {string}
+       */
+      type: "ROUTINE_FOLDER";
+      /** @constant */
+      schema_version: 1;
+      created_at: components["schemas"]["Timestamp"];
+      updated_at: components["schemas"]["Timestamp"];
+      deleted_at: components["schemas"]["DeletedAt"];
+      name: components["schemas"]["Name"];
+      sort_order: components["schemas"]["SortOrder"];
+      notes?: components["schemas"]["Notes"];
     };
     /**
      * Workout
@@ -173,6 +197,7 @@ export interface components {
       | components["schemas"]["Profile"]
       | components["schemas"]["Exercise"]
       | components["schemas"]["Routine"]
+      | components["schemas"]["RoutineFolder"]
       | components["schemas"]["Workout"];
     Health: {
       /** @constant */
@@ -199,7 +224,7 @@ export interface components {
     PushResult: {
       id: string;
       /** @enum {string} */
-      type: "PROFILE" | "EXERCISE" | "ROUTINE" | "WORKOUT";
+      type: "PROFILE" | "EXERCISE" | "ROUTINE" | "ROUTINE_FOLDER" | "WORKOUT";
       /**
        * @description `applied`: written. `stale`: the server has a newer `updated_at`; `current` is its copy.
        *     `invalid`: failed validation; see `problem`.
@@ -279,6 +304,8 @@ export interface components {
       | "distance_duration"
       | "weight_distance";
     Notes: string;
+    /** @description Position in a user-ordered list, ascending. Leave gaps (e.g. steps of 1000) so a move rewrites one item. Ties sort by name, then created_at. */
+    SortOrder: number;
     /** @description Reference to an exercise: `builtin:<slug>` for the built-in catalogue, or the UUID of one of the user's custom exercises. */
     ExerciseRef: string;
     /** @description Exercises in the same workout or routine with the same group number form a superset. */
