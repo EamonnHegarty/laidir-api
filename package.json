@@ -11,10 +11,14 @@
   },
   "devDependencies": {
     "@eslint/js": "^10.0.1",
+    "@redocly/cli": "^2.78.0",
     "@types/aws-lambda": "^8.10.164",
     "@types/node": "^24.19.2",
+    "ajv": "^8.20.0",
+    "ajv-formats": "^3.0.1",
     "eslint": "^10.15.0",
     "eslint-config-prettier": "^10.1.8",
+    "openapi-typescript": "^7.13.0",
     "prettier": "^3.10.1",
     "typescript": "~6.0.3",
     "typescript-eslint": "^8.72.2",
@@ -26,6 +30,10 @@
     "lint": "eslint .",
     "typecheck": "tsc",
     "test": "vitest run",
-    "check": "pnpm format:check && pnpm lint && pnpm typecheck && pnpm test"
+    "check": "pnpm format:check && pnpm lint && pnpm spec:lint && pnpm typecheck && pnpm test",
+    "spec:lint": "redocly lint",
+    "spec:bundle": "redocly bundle laidir --ext json -o openapi/openapi.bundled.json",
+    "types:gen": "openapi-typescript && prettier --write src/generated/openapi.ts --ignore-path=/dev/null --log-level=warn",
+    "gen": "pnpm spec:bundle && pnpm types:gen"
   }
 }

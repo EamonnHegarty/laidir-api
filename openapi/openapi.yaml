@@ -1,0 +1,323 @@
+openapi: 3.1.1
+info:
+  title: Láidir API
+  version: 0.1.0
+  summary: Backup and sync for the Láidir gym tracker.
+  description: |
+    The contract between the Láidir app and its backend. **This file is the source of truth**:
+    the mobile app generates its typed client from `openapi.bundled.json`, and the API's own
+    types are generated from it too.
+
+    Entity schemas live in `schemas/v1/` as JSON Schema 2020-12 and are shared with the MCP server.
+
+    ## Conventions
+    - IDs are client-generated lowercase UUIDs. Timestamps are ISO-8601 UTC with milliseconds.
+    - The user is **always** the verified token's `sub`. No endpoint takes a user ID.
+    - Errors are RFC 9457 `application/problem+json`.
+    - Deletes are soft: set `deleted_at`. Tombstones sync like any other change.
+
+    ## Sync model (phase 3)
+    - **Push**: the client sends whole items. Each write is conditional on `updated_at`
+      (last writer wins). A stale write is rejected with the server's current copy.
+    - **Pull**: the server stamps every accepted write with its own clock (`synced_at`, not exposed).
+      Pull pages through changes in `synced_at` order from an opaque cursor, so a device with a
+      wrong clock can't make its changes invisible to other devices.
+
+    Operations marked `x-laidir-status: planned` aren't implemented yet.
+  license:
+    name: MIT
+    identifier: MIT
+  contact:
+    url: https://github.com/EamonnHegarty/laidir-api/issues
+
+servers:
+  - url: https://yqyk3qt5b8.execute-api.eu-west-1.amazonaws.com
+    description: prod
+
+security:
+  - cognito: [openid, email, profile]
+
+tags:
+  - name: health
+    description: Liveness
+  - name: sync
+    description: Backup and multi-device sync
+  - name: profile
+    description: The signed-in user's profile
+
+paths:
+  /health:
+    get:
+      operationId: getHealth
+      summary: Liveness check
+      description: Public. Returns the deployed version. Throttled to 1 rps.
+      tags: [health]
+      security: []
+      responses:
+        "200":
+          description: The API is up.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Health"
+        "429":
+          $ref: "#/components/responses/TooManyRequests"
+
+  /v1/sync:
+    get:
+      operationId: pullChanges
+      summary: Pull changes since a cursor
+      description: |
+        Every item (all types, including tombstones) changed since `cursor`, oldest first.
+        Omit `cursor` for a full download. Keep calling with `next_cursor` until `has_more` is false,
+        then store the final `next_cursor` for the next sync.
+      tags: [sync]
+      x-laidir-status: planned
+      parameters:
+        - name: cursor
+          in: query
+          required: false
+          description: Opaque cursor from a previous pull.
+          schema:
+            type: string
+            maxLength: 512
+        - name: limit
+          in: query
+          required: false
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 200
+            default: 100
+      responses:
+        "200":
+          description: A page of changes.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PullResponse"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "429":
+          $ref: "#/components/responses/TooManyRequests"
+    post:
+      operationId: pushChanges
+      summary: Push local changes
+      description: |
+        Upserts up to 25 whole items by id. Each item is applied independently; one stale or invalid
+        item doesn't fail the rest. Retrying a push is safe.
+      tags: [sync]
+      x-laidir-status: planned
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/PushRequest"
+      responses:
+        "200":
+          description: Per-item results, in request order.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PushResponse"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "413":
+          $ref: "#/components/responses/PayloadTooLarge"
+        "429":
+          $ref: "#/components/responses/TooManyRequests"
+
+  /v1/profile:
+    get:
+      operationId: getProfile
+      summary: Get the signed-in user's profile
+      description: Returns 404 until the user's first profile push.
+      tags: [profile]
+      x-laidir-status: planned
+      responses:
+        "200":
+          description: The profile.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Profile"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "429":
+          $ref: "#/components/responses/TooManyRequests"
+
+components:
+  securitySchemes:
+    cognito:
+      type: oauth2
+      description: Cognito access token (authorization code + PKCE). Validated by API Gateway's JWT authorizer.
+      flows:
+        authorizationCode:
+          authorizationUrl: https://laidir-prod-4d9359.auth.eu-west-1.amazoncognito.com/oauth2/authorize
+          tokenUrl: https://laidir-prod-4d9359.auth.eu-west-1.amazoncognito.com/oauth2/token
+          refreshUrl: https://laidir-prod-4d9359.auth.eu-west-1.amazoncognito.com/oauth2/token
+          scopes:
+            openid: OpenID Connect
+            email: Email address
+            profile: Basic profile
+
+  schemas:
+    Profile:
+      $ref: ../schemas/v1/Profile.json
+    Exercise:
+      $ref: ../schemas/v1/Exercise.json
+    Routine:
+      $ref: ../schemas/v1/Routine.json
+    Workout:
+      $ref: ../schemas/v1/Workout.json
+
+    Entity:
+      description: Any syncable item, discriminated by `type`.
+      oneOf:
+        - $ref: "#/components/schemas/Profile"
+        - $ref: "#/components/schemas/Exercise"
+        - $ref: "#/components/schemas/Routine"
+        - $ref: "#/components/schemas/Workout"
+      discriminator:
+        propertyName: type
+        mapping:
+          PROFILE: "#/components/schemas/Profile"
+          EXERCISE: "#/components/schemas/Exercise"
+          ROUTINE: "#/components/schemas/Routine"
+          WORKOUT: "#/components/schemas/Workout"
+
+    Health:
+      type: object
+      additionalProperties: false
+      required: [status, service, version, schema_version]
+      properties:
+        status:
+          const: ok
+        service:
+          const: laidir-api
+        version:
+          description: Git commit SHA of the deployed code.
+          type: string
+        schema_version:
+          description: Highest entity schema version this deployment accepts.
+          type: integer
+
+    PullResponse:
+      type: object
+      additionalProperties: false
+      required: [items, next_cursor, has_more]
+      properties:
+        items:
+          type: array
+          items:
+            $ref: "#/components/schemas/Entity"
+        next_cursor:
+          description: Pass to the next pull. Store the last one once `has_more` is false.
+          type: string
+        has_more:
+          type: boolean
+
+    PushRequest:
+      type: object
+      additionalProperties: false
+      required: [items]
+      properties:
+        items:
+          type: array
+          minItems: 1
+          maxItems: 25
+          items:
+            $ref: "#/components/schemas/Entity"
+
+    PushResponse:
+      type: object
+      additionalProperties: false
+      required: [results]
+      properties:
+        results:
+          type: array
+          items:
+            $ref: "#/components/schemas/PushResult"
+
+    PushResult:
+      type: object
+      additionalProperties: false
+      required: [id, type, status]
+      properties:
+        id:
+          type: string
+        type:
+          type: string
+          enum: [PROFILE, EXERCISE, ROUTINE, WORKOUT]
+        status:
+          description: |
+            `applied`: written. `stale`: the server has a newer `updated_at`; `current` is its copy.
+            `invalid`: failed validation; see `problem`.
+          type: string
+          enum: [applied, stale, invalid]
+        current:
+          $ref: "#/components/schemas/Entity"
+        problem:
+          $ref: "#/components/schemas/Problem"
+
+    Problem:
+      description: RFC 9457 problem details.
+      type: object
+      required: [title, status]
+      properties:
+        type:
+          type: string
+          default: about:blank
+        title:
+          type: string
+        status:
+          type: integer
+        detail:
+          type: string
+        instance:
+          type: string
+
+  responses:
+    BadRequest:
+      description: The request was malformed or failed validation.
+      content:
+        application/problem+json:
+          schema:
+            $ref: "#/components/schemas/Problem"
+    Unauthorized:
+      description: Missing or invalid access token.
+      content:
+        application/json:
+          schema:
+            type: object
+            properties:
+              message:
+                type: string
+    NotFound:
+      description: Not found.
+      content:
+        application/problem+json:
+          schema:
+            $ref: "#/components/schemas/Problem"
+    PayloadTooLarge:
+      description: Request body too large.
+      content:
+        application/problem+json:
+          schema:
+            $ref: "#/components/schemas/Problem"
+    TooManyRequests:
+      description: Throttled by API Gateway.
+      content:
+        application/json:
+          schema:
+            type: object
+            properties:
+              message:
+                type: string
