@@ -20,5 +20,10 @@ export default tseslint.config(
     files: ["**/*.js", "**/*.mjs"],
     ...tseslint.configs.disableTypeChecked,
   },
+  {
+    // Node build scripts.
+    files: ["scripts/**/*.mjs"],
+    languageOptions: { globals: { process: "readonly", console: "readonly" } },
+  },
   prettier,
 );
