@@ -39,6 +39,19 @@ jobs:
       - name: Lint
         run: pnpm lint
 
+      - name: Lint OpenAPI spec
+        run: pnpm spec:lint
+
+      # The bundled spec (consumed by laidir-mobile) and the generated types are committed.
+      # Fail if either is stale relative to openapi/ and schemas/.
+      - name: Generated files are up to date
+        run: |
+          pnpm gen
+          if ! git diff --exit-code -- openapi/openapi.bundled.json src/generated/; then
+            echo "::error::Run 'pnpm gen' and commit the result."
+            exit 1
+          fi
+
       - name: Typecheck
         run: pnpm typecheck
 

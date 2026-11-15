@@ -1,0 +1,22 @@
+extends:
+  - recommended
+
+apis:
+  laidir:
+    root: openapi/openapi.yaml
+    # Used by openapi-typescript (`pnpm types:gen`).
+    x-openapi-ts:
+      output: src/generated/openapi.ts
+
+rules:
+  # Every operation must say what it does and declare its errors.
+  operation-description: warn
+  operation-4xx-response: error
+  no-unused-components: error
+  # Planned endpoints carry this marker until they're implemented.
+  rule/x-laidir-status-values:
+    subject:
+      type: Operation
+      property: x-laidir-status
+    assertions:
+      enum: [planned]
