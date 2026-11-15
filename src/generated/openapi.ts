@@ -96,7 +96,12 @@ export interface components {
       weight_unit: "kg" | "lb";
       /** @enum {string} */
       distance_unit: "km" | "mi";
+      /** @description Rest timer used when neither exercise_rest_seconds nor the routine sets one. */
       default_rest_seconds?: components["schemas"]["RestSeconds"];
+      /** @description Rest timer chosen per exercise, keyed by ExerciseRef (builtin:<slug> or a custom exercise's uuid). Applies every time the user does that exercise. Precedence: exercise_rest_seconds, then the routine's rest_seconds, then default_rest_seconds. Keys for deleted custom exercises may remain; readers ignore them. */
+      exercise_rest_seconds?: {
+        [key: string]: components["schemas"]["RestSeconds"];
+      };
     };
     /**
      * Exercise
@@ -256,6 +261,8 @@ export interface components {
     /** @description Soft-delete marker. null while the item is live; a timestamp once deleted. Tombstones are synced so other devices delete too. */
     DeletedAt: components["schemas"]["Timestamp"] | null;
     RestSeconds: number;
+    /** @description Reference to an exercise: `builtin:<slug>` for the built-in catalogue, or the UUID of one of the user's custom exercises. */
+    ExerciseRef: string;
     Name: string;
     /** @enum {string} */
     Equipment:
@@ -306,8 +313,6 @@ export interface components {
     Notes: string;
     /** @description Position in a user-ordered list, ascending. Leave gaps (e.g. steps of 1000) so a move rewrites one item. Ties sort by name, then created_at. */
     SortOrder: number;
-    /** @description Reference to an exercise: `builtin:<slug>` for the built-in catalogue, or the UUID of one of the user's custom exercises. */
-    ExerciseRef: string;
     /** @description Exercises in the same workout or routine with the same group number form a superset. */
     SupersetGroup: number;
     /** @enum {string} */
