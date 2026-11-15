@@ -17,6 +17,8 @@ info:
     - Deletes are soft: set `deleted_at`. Tombstones sync like any other change.
     - Deleting a `RoutineFolder`: tombstone the folder and push each of its routines with `folder_id`
       removed. Readers treat a `folder_id` pointing to a missing or deleted folder as unfiled.
+    - Rest timer precedence: `Profile.exercise_rest_seconds[<exercise_id>]`, then the routine's
+      `rest_seconds`, then `Profile.default_rest_seconds`.
     - Built-in exercises (`exercise_id: builtin:<slug>`) come from the static catalogue in
       `catalogue/v1/exercises.json`, not from this API.
 
