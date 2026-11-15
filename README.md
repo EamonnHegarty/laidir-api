@@ -14,10 +14,15 @@ This repo owns the Lambda **code** and the **API contract**.
 | [`openapi/openapi.bundled.json`](openapi/openapi.bundled.json) | Single-file bundle (generated). laidir-mobile generates its client from this |
 | [`schemas/v1/`](schemas/v1)                                    | Versioned entity schemas (JSON Schema 2020-12), shared by REST and MCP       |
 | [`src/generated/openapi.ts`](src/generated/openapi.ts)         | TypeScript types (generated)                                                 |
+| [`catalogue/v1/exercises.json`](catalogue/v1/exercises.json)   | Built-in exercise catalogue (static, versioned). See [catalogue/](catalogue) |
 
-Entities: `Profile`, `Exercise` (custom), `Routine`, `Workout` (sets embedded). All carry `id` (client UUID),
-`type`, `schema_version`, `created_at`, `updated_at` and `deleted_at` (soft delete). Weights are kilograms.
-Built-in exercises are referenced as `builtin:<slug>`.
+Entities: `Profile`, `Exercise` (custom), `RoutineFolder`, `Routine`, `Workout` (sets embedded). All carry `id`
+(client UUID), `type`, `schema_version`, `created_at`, `updated_at` and `deleted_at` (soft delete). Weights are kilograms.
+Built-in exercises are referenced as `builtin:<slug>`; **slugs are permanent** (deprecate, never delete).
+
+Routines can sit in a `RoutineFolder` (`folder_id`); folders and routines are ordered by `sort_order`.
+Deleting a folder tombstones it and removes `folder_id` from its routines. Readers treat a `folder_id`
+that points to a missing or deleted folder as unfiled.
 
 Changing the contract: edit `openapi/` or `schemas/`, run `pnpm gen`, commit the generated files.
 CI fails if they're stale. Breaking entity changes need a new `schema_version` and `schemas/v2/`.
