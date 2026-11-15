@@ -1,0 +1,126 @@
+name: deploy
+
+on:
+  push:
+    branches: [main]
+    # Only changes that affect the bundles trigger a deploy. Docs and the spec alone don't.
+    paths:
+      - "src/**"
+      - "schemas/**"
+      - "scripts/build.mjs"
+      - "package.json"
+      - "pnpm-lock.yaml"
+      - ".node-version"
+      - ".github/workflows/deploy.yml"
+  workflow_dispatch:
+
+permissions: {}
+
+# One deploy at a time; never cancel one halfway through updating the functions.
+concurrency:
+  group: deploy-prod
+  cancel-in-progress: false
+
+env:
+  AWS_REGION: eu-west-1
+  # Public values (see laidir-infra outputs); not secrets.
+  API_ENDPOINT: https://yqyk3qt5b8.execute-api.eu-west-1.amazonaws.com
+  DEPLOY_ROLE: arn:aws:iam::670518205160:role/laidir-gha-api-deploy-prod
+  FUNCTION_PREFIX: laidir-prod
+
+jobs:
+  deploy:
+    name: deploy (prod)
+    runs-on: ubuntu-latest
+    # The deploy role only trusts `environment:prod` from this repo's immutable ID.
+    environment:
+      name: prod
+      url: ${{ env.API_ENDPOINT }}/health
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - uses: pnpm/action-setup@73e46992e05b19abd31f2f3c20e0e7370d762115 # v6.1.1
+
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version-file: .node-version
+          cache: pnpm
+
+      - name: Install
+        run: pnpm install --frozen-lockfile
+
+      - name: Build
+        env:
+          LAIDIR_VERSION: ${{ github.sha }}
+        run: |
+          pnpm build
+          for fn in api mcp; do
+            (cd "dist/${fn}" && zip -X -q "../${fn}.zip" index.mjs)
+          done
+          ls -l dist/*.zip
+
+      - uses: aws-actions/configure-aws-credentials@e1253824e5c10ff9df46874f81ed3ec929e19cfd # v6.3.0
+        with:
+          role-to-assume: ${{ env.DEPLOY_ROLE }}
+          role-session-name: laidir-api-deploy-${{ github.run_id }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Update function code
+        run: |
+          for fn in api mcp; do
+            name="${FUNCTION_PREFIX}-${fn}"
+            echo "::group::${name}"
+            aws lambda update-function-code \
+              --function-name "${name}" \
+              --zip-file "fileb://dist/${fn}.zip" \
+              --query '{FunctionName: FunctionName, CodeSha256: CodeSha256, LastUpdateStatus: LastUpdateStatus}' \
+              --output table
+            aws lambda wait function-updated-v2 --function-name "${name}"
+            echo "::endgroup::"
+          done
+
+      # Proves the new code is live end to end through API Gateway, not just uploaded.
+      # Retries with backoff: /health is throttled to 1 rps and Lambda may still be swapping versions.
+      - name: Smoke test
+        env:
+          EXPECTED: ${{ github.sha }}
+        run: |
+          check() {
+            local path=$1 want_status=$2 status version
+            for attempt in 1 2 3 4 5 6; do
+              status=$(curl -sS -o body.json -D headers.txt -w '%{http_code}' "${API_ENDPOINT}${path}" || true)
+              version=$(grep -i '^x-laidir-version:' headers.txt | tr -d '\r' | awk '{print $2}' || true)
+              if [[ "$status" == "$want_status" && "$version" == "$EXPECTED" ]]; then
+                echo "✅ ${path} → ${status}, version ${version}"
+                return 0
+              fi
+              echo "attempt ${attempt}: ${path} → ${status}, version '${version}'; retrying"
+              sleep $((attempt * 3))
+            done
+            echo "::error::${path} did not return ${want_status} from ${EXPECTED}"
+            cat body.json || true
+            return 1
+          }
+          check /health 200
+          jq -e --arg v "$EXPECTED" '.status == "ok" and .version == $v' body.json
+          check /mcp 503
+
+      - name: Summary
+        if: always()
+        run: |
+          {
+            echo "### Deploy: \`${GITHUB_SHA::7}\` → prod"
+            echo ""
+            echo "| Function | Bundle |"
+            echo "|---|---|"
+            for fn in api mcp; do
+              [[ -f "dist/${fn}.zip" ]] && echo "| \`${FUNCTION_PREFIX}-${fn}\` | $(stat -c %s "dist/${fn}.zip") bytes |"
+            done
+            echo ""
+            echo "Health: ${API_ENDPOINT}/health"
+          } >> "$GITHUB_STEP_SUMMARY"
