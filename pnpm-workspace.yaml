@@ -1,0 +1,5 @@
+# Dependency build scripts are denied unless reviewed and listed here (strictDepBuilds fails CI otherwise).
+allowBuilds:
+  # esbuild's postinstall only verifies its binary; the binary itself comes from the
+  # platform-specific optional dependency (@esbuild/linux-x64 etc.), so the script isn't needed.
+  esbuild: false
