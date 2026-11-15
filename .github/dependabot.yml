@@ -1,0 +1,34 @@
+version: 2
+updates:
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+    cooldown:
+      default-days: 7
+    groups:
+      actions:
+        patterns: ["*"]
+
+  - package-ecosystem: npm
+    directory: /
+    schedule:
+      interval: weekly
+    # Supply-chain buffer: let new releases age before they're proposed.
+    cooldown:
+      default-days: 7
+      semver-major-days: 14
+    groups:
+      dev-dependencies:
+        dependency-type: development
+        update-types: [minor, patch]
+      runtime-dependencies:
+        dependency-type: production
+        update-types: [minor, patch]
+    ignore:
+      # Lambda runs nodejs24.x; keep @types/node on the matching major.
+      - dependency-name: "@types/node"
+        update-types: [version-update:semver-major]
+      # typescript-eslint supports TypeScript < 6.1; bump together, by hand.
+      - dependency-name: typescript
+        update-types: [version-update:semver-minor, version-update:semver-major]
