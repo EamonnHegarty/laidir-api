@@ -1,8 +1,8 @@
 // Signs in through Cognito managed login (authorization code + PKCE) with the devtools app client
 // and writes a short-lived access token for the Bruno collection.
 //
-//   LAIDIR_DEVTOOLS_CLIENT_ID=<id> pnpm token           # writes bruno/.env (gitignored)
-//   LAIDIR_DEVTOOLS_CLIENT_ID=<id> pnpm -s token --print # prints the token instead (for curl)
+//   pnpm auth:token           # writes bruno/.env (gitignored)
+//   pnpm -s auth:token --print # prints the token instead (for curl)
 //
 // The client ID is public: `terraform -chdir=envs/prod output -raw devtools_client_id` in laidir-infra.
 // The access token lasts 60 minutes; run this again when it expires. Nothing else is stored.
@@ -13,7 +13,8 @@ import { URL, URLSearchParams } from "node:url";
 
 const AUTH_DOMAIN =
   process.env.LAIDIR_AUTH_DOMAIN ?? "https://laidir-prod-4d9359.auth.eu-west-1.amazoncognito.com";
-const CLIENT_ID = process.env.LAIDIR_DEVTOOLS_CLIENT_ID;
+// Public client ID (laidir-infra output devtools_client_id); override for another environment.
+const CLIENT_ID = process.env.LAIDIR_DEVTOOLS_CLIENT_ID ?? "4s584176r7qm7fnvacqa54p40e";
 // Must match the devtools client's callback URL in laidir-infra exactly.
 const PORT = 8976;
 const REDIRECT_URI = `http://localhost:${PORT}/callback`;
@@ -76,7 +77,7 @@ const onRequest = async (req, res) => {
     res.writeHead(status, { "content-type": "text/plain; charset=utf-8" }).end(message);
   };
   if (url.searchParams.get("state") !== state) {
-    finish(400, "State mismatch. Close this tab and run pnpm token again.");
+    finish(400, "State mismatch. Close this tab and run pnpm auth:token again.");
     console.error("State mismatch; ignoring the callback.");
     return;
   }

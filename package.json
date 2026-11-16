@@ -35,7 +35,7 @@
     "types:gen": "openapi-typescript && prettier --write src/generated/openapi.ts --ignore-path=/dev/null --log-level=warn",
     "gen": "pnpm spec:bundle && pnpm types:gen",
     "build": "node scripts/build.mjs",
-    "token": "node scripts/token.mjs"
+    "auth:token": "node scripts/token.mjs"
   },
   "dependencies": {
     "@aws-sdk/client-dynamodb": "^3.1169.0",

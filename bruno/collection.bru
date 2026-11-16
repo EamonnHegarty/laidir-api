@@ -9,7 +9,7 @@ auth:bearer {
 docs {
   # Láidir API
 
-  1. `LAIDIR_DEVTOOLS_CLIENT_ID=<id> pnpm token` (from the repo root) signs you in and writes
+  1. `pnpm auth:token` (from the repo root) signs you in and writes
      `bruno/.env` (gitignored) with a 60-minute access token.
   2. Pick the `prod` environment and send requests. `/v1/*` only ever acts on your own data
      (the token's `sub`).

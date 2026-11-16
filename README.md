@@ -67,10 +67,12 @@ pnpm build     # dist/api/index.mjs, dist/mcp/index.mjs
 Cognito with the `laidir-prod-devtools` client (public, PKCE, redirect `http://localhost:8976/callback`):
 
 ```bash
-export LAIDIR_DEVTOOLS_CLIENT_ID=<laidir-infra output devtools_client_id>
-pnpm token                       # opens nothing: copy the printed URL into a browser, sign in
-                                 # → writes bruno/.env (gitignored), valid 60 min
-curl -H "authorization: Bearer $(pnpm -s token --print)" \
+# Uses the prod devtools client by default (set LAIDIR_DEVTOOLS_CLIENT_ID to override).
+# Prints a sign-in URL: open it in a browser and sign in.
+# Then writes bruno/.env (gitignored) with an access token valid for 60 minutes.
+# Not `pnpm token`: that's a built-in pnpm command.
+pnpm auth:token
+curl -H "authorization: Bearer $(pnpm -s auth:token --print)" \
   https://yqyk3qt5b8.execute-api.eu-west-1.amazonaws.com/v1/profile
 ```
 
