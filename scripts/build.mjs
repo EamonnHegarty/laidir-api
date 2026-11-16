@@ -31,6 +31,8 @@ for (const name of FUNCTIONS) {
     minify: false,
     sourcemap: false,
     legalComments: "none",
+    // The nodejs24.x runtime ships AWS SDK v3; bundling it would blow the size guard.
+    external: ["@aws-sdk/*"],
     define: { LAIDIR_VERSION: JSON.stringify(version) },
     logLevel: "warning",
   });
