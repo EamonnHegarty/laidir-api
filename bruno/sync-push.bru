@@ -1,0 +1,36 @@
+meta {
+  name: Push a custom exercise
+  type: http
+  seq: 3
+}
+
+post {
+  url: {{baseUrl}}/v1/sync
+  body: json
+  auth: inherit
+}
+
+body:json {
+  {
+    "items": [
+      {
+        "id": "b7a1c3d2-0000-4000-8000-00000000b001",
+        "type": "EXERCISE",
+        "schema_version": 1,
+        "created_at": "2026-11-16T12:00:00.000Z",
+        "updated_at": "2026-11-16T12:00:00.000Z",
+        "deleted_at": null,
+        "name": "Bruno test exercise",
+        "equipment": "cable",
+        "primary_muscle": "chest",
+        "tracking": "weight_reps"
+      }
+    ]
+  }
+}
+
+docs {
+  Sending this twice returns `applied` both times (a retry with the same `updated_at`).
+  Lower `updated_at` after the first send to see `stale` with the server's copy; raise it to apply a change.
+  Set `deleted_at` to a timestamp (and raise `updated_at`) to tombstone it.
+}

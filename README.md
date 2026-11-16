@@ -29,8 +29,21 @@ CI fails if they're stale. Breaking entity changes need a new `schema_version` a
 
 ## Layout
 
+## Endpoints
+
+| Route                         | What                                                                                     |
+| ----------------------------- | ---------------------------------------------------------------------------------------- |
+| `GET /health`                 | Public liveness + deployed version                                                       |
+| `GET /v1/sync?cursor=&limit=` | Changes since an opaque cursor, in server `synced_at` order (writes ≥ 2 s old)           |
+| `POST /v1/sync`               | Up to 25 whole items; each `applied`, `stale` (with the server's `current`) or `invalid` |
+| `GET /v1/profile`             | The caller's Profile (404 until first pushed)                                            |
+
+`/v1` sits behind API Gateway's JWT authorizer (mobile and devtools Cognito clients). The handler only runs
+`/v1` logic when the route key is `ANY /v1/{proxy+}`, and every read and write is keyed on the token's `sub`.
+Writes are conditional on `updated_at` (last writer wins); a retried write reports `applied`.
+
 ```
-src/api/      REST Lambda (laidir-<env>-api): GET /health, /v1/* (phase 3)
+src/api/      REST Lambda (laidir-<env>-api): GET /health, /v1/sync, /v1/profile
 src/mcp/      MCP Lambda (laidir-<env>-mcp): /mcp, /.well-known/oauth-protected-resource (phase 4)
 src/shared/   HTTP helpers (RFC 9457 problems), build info
 scripts/      esbuild bundling
@@ -47,6 +60,22 @@ pnpm check     # format, lint, spec lint, typecheck, test, build
 pnpm gen       # re-bundle the spec and regenerate types
 pnpm build     # dist/api/index.mjs, dist/mcp/index.mjs
 ```
+
+### Calling prod with a real token
+
+[`bruno/`](bruno) is a [Bruno](https://www.usebruno.com/) collection for the API. To get a token, sign in through
+Cognito with the `laidir-prod-devtools` client (public, PKCE, redirect `http://localhost:8976/callback`):
+
+```bash
+export LAIDIR_DEVTOOLS_CLIENT_ID=<laidir-infra output devtools_client_id>
+pnpm token                       # opens nothing: copy the printed URL into a browser, sign in
+                                 # → writes bruno/.env (gitignored), valid 60 min
+curl -H "authorization: Bearer $(pnpm -s token --print)" \
+  https://yqyk3qt5b8.execute-api.eu-west-1.amazonaws.com/v1/profile
+```
+
+Open the `bruno/` folder in Bruno, choose the `prod` environment, and send requests. Everything under `/v1`
+acts only on the signed-in user's own data.
 
 ## CI/CD
 

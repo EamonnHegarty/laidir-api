@@ -1,0 +1,21 @@
+meta {
+  name: Pull changes
+  type: http
+  seq: 2
+}
+
+get {
+  url: {{baseUrl}}/v1/sync?limit=100
+  body: none
+  auth: inherit
+}
+
+params:query {
+  limit: 100
+  ~cursor:
+}
+
+docs {
+  Omit `cursor` for a full download. Repeat with `next_cursor` until `has_more` is false.
+  Only writes at least 2 seconds old are returned.
+}
