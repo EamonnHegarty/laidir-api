@@ -1,0 +1,15 @@
+meta {
+  name: Get profile
+  type: http
+  seq: 4
+}
+
+get {
+  url: {{baseUrl}}/v1/profile
+  body: none
+  auth: inherit
+}
+
+docs {
+  404 until a Profile has been pushed. A Profile's `id` must be your Cognito `sub`.
+}
