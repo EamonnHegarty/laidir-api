@@ -397,6 +397,15 @@ export interface components {
         "application/problem+json": components["schemas"]["Problem"];
       };
     };
+    /** @description Unexpected server error. Retrying is safe (pushes are idempotent). */
+    InternalError: {
+      headers: {
+        [name: string]: unknown;
+      };
+      content: {
+        "application/problem+json": components["schemas"]["Problem"];
+      };
+    };
     /** @description Throttled by API Gateway. */
     TooManyRequests: {
       headers: {
@@ -462,6 +471,7 @@ export interface operations {
       400: components["responses"]["BadRequest"];
       401: components["responses"]["Unauthorized"];
       429: components["responses"]["TooManyRequests"];
+      500: components["responses"]["InternalError"];
     };
   };
   pushChanges: {
@@ -490,6 +500,7 @@ export interface operations {
       401: components["responses"]["Unauthorized"];
       413: components["responses"]["PayloadTooLarge"];
       429: components["responses"]["TooManyRequests"];
+      500: components["responses"]["InternalError"];
     };
   };
   getProfile: {
@@ -513,6 +524,7 @@ export interface operations {
       401: components["responses"]["Unauthorized"];
       404: components["responses"]["NotFound"];
       429: components["responses"]["TooManyRequests"];
+      500: components["responses"]["InternalError"];
     };
   };
 }
