@@ -1,12 +1,5 @@
 import type { APIGatewayProxyEventV2, APIGatewayProxyStructuredResultV2 } from "aws-lambda";
 import type { components } from "../generated/openapi.js";
-import {
-  AUTH_SERVER_METADATA_PATH,
-  AUTHORIZE_PATH,
-  authorizeRedirect,
-  authServerMetadata,
-  cognitoDiscovery,
-} from "../shared/auth-server-metadata.js";
 import { SCHEMA_VERSION, VERSION, VERSION_HEADER } from "../shared/build-info.js";
 import { json, problem } from "../shared/http.js";
 import { type Accounts, CognitoAccounts, createCognitoClient } from "./accounts.js";
@@ -23,60 +16,14 @@ export const V1_ROUTE_KEY = "ANY /v1/{proxy+}";
  * REST API Lambda (laidir-<env>-api). API Gateway routes here:
  *   GET /health          public
  *   ANY /v1/{proxy+}     JWT authorizer (mobile + devtools clients) runs first
- *   $default             unmatched paths (no auth): the Claude connector's authorization server
- *                        metadata (public), otherwise 404
+ *   $default             unmatched paths (no auth): always 404
  *
  * Never route /v1 on the raw path: a request to /v1/... can also arrive through `$default`
  * without a token. Only the route key proves the authorizer ran.
  */
-export function createHandler(
-  deps: V1Deps & { cognitoDiscovery?: () => Promise<Record<string, unknown>> },
-) {
+export function createHandler(deps: V1Deps) {
   return async (event: APIGatewayProxyEventV2): Promise<APIGatewayProxyStructuredResultV2> => {
     const { method, path } = event.requestContext.http;
-
-    if (method === "GET" && path === AUTHORIZE_PATH && deps.cognitoDiscovery) {
-      try {
-        const location = authorizeRedirect(await deps.cognitoDiscovery(), event.rawQueryString);
-        return {
-          statusCode: 302,
-          headers: { location, "cache-control": "no-store", ...VERSION_HEADER },
-        };
-      } catch (err) {
-        console.error(
-          JSON.stringify({
-            level: "error",
-            msg: "authorize redirect failed",
-            error: err instanceof Error ? `${err.name}: ${err.message}` : String(err),
-          }),
-        );
-        return problem(502, "Bad Gateway", { detail: "Couldn't reach sign-in." }, VERSION_HEADER);
-      }
-    }
-
-    if (method === "GET" && path === AUTH_SERVER_METADATA_PATH && deps.cognitoDiscovery) {
-      try {
-        const origin = `https://${event.requestContext.domainName}`;
-        return json(200, authServerMetadata(origin, await deps.cognitoDiscovery()), {
-          ...VERSION_HEADER,
-          "cache-control": "public, max-age=300",
-        });
-      } catch (err) {
-        console.error(
-          JSON.stringify({
-            level: "error",
-            msg: "authorization server metadata failed",
-            error: err instanceof Error ? `${err.name}: ${err.message}` : String(err),
-          }),
-        );
-        return problem(
-          502,
-          "Bad Gateway",
-          { detail: "Couldn't read Cognito's metadata." },
-          VERSION_HEADER,
-        );
-      }
-    }
 
     if (method === "GET" && path === "/health") {
       const body: Health = {
@@ -137,9 +84,4 @@ export const handler = createHandler({
   },
   now: () => new Date(),
   allowedClientIds: () => allowedClientIdsFromEnv(),
-  cognitoDiscovery: () => {
-    const issuer = process.env.COGNITO_ISSUER;
-    if (!issuer) throw new Error("COGNITO_ISSUER is not set");
-    return cognitoDiscovery(issuer);
-  },
 });

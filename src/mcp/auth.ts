@@ -20,14 +20,8 @@ export type Verified = { ok: true; sub: string; auth: AuthInfo } | { ok: false; 
 /**
  * Verifies a Cognito access token for this MCP server (there's no gateway authorizer on /mcp):
  * signature (RS256, issuer's JWKS), issuer, expiry, `token_use=access`, the Claude client, a UUID
- * `sub`, and that it was issued for this server.
- *
- * Audience: Cognito can only bind `aud` through a resource-bound authorize request, which fails at
- * the token step without a matching Cognito resource server, so our authorize redirect drops
- * `resource` (see src/shared/auth-server-metadata.ts) and tokens arrive without `aud`. The token is
- * bound to this server by its client instead: only the Claude client is accepted, and that client
- * exists solely for this connector (its only redirect is Claude's callback). If a token does carry
- * `aud`, it must be the MCP URL.
+ * `sub`, and that it was issued for this server: Claude sends the RFC 8707 `resource` parameter
+ * and Cognito puts it in `aud`, so `aud` must equal the MCP URL.
  *
  * `reason` is safe to log (it never contains the token).
  */
@@ -48,10 +42,8 @@ export async function verifyAccessToken(
   }
   if (payload.token_use !== "access") return { ok: false, reason: "not an access token" };
   if (payload.client_id !== cfg.clientId) return { ok: false, reason: "wrong client" };
-  if (payload.aud !== undefined) {
-    const audiences = Array.isArray(payload.aud) ? payload.aud : [payload.aud];
-    if (!audiences.includes(resource)) return { ok: false, reason: "wrong audience" };
-  }
+  const audiences = Array.isArray(payload.aud) ? payload.aud : [payload.aud];
+  if (!audiences.includes(resource)) return { ok: false, reason: "wrong audience" };
   const sub = payload.sub;
   if (typeof sub !== "string" || !UUID.test(sub)) return { ok: false, reason: "bad sub" };
 
