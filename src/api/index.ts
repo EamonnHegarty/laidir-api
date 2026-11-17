@@ -2,6 +2,8 @@ import type { APIGatewayProxyEventV2, APIGatewayProxyStructuredResultV2 } from "
 import type { components } from "../generated/openapi.js";
 import {
   AUTH_SERVER_METADATA_PATH,
+  AUTHORIZE_PATH,
+  authorizeRedirect,
   authServerMetadata,
   cognitoDiscovery,
 } from "../shared/auth-server-metadata.js";
@@ -32,6 +34,25 @@ export function createHandler(
 ) {
   return async (event: APIGatewayProxyEventV2): Promise<APIGatewayProxyStructuredResultV2> => {
     const { method, path } = event.requestContext.http;
+
+    if (method === "GET" && path === AUTHORIZE_PATH && deps.cognitoDiscovery) {
+      try {
+        const location = authorizeRedirect(await deps.cognitoDiscovery(), event.rawQueryString);
+        return {
+          statusCode: 302,
+          headers: { location, "cache-control": "no-store", ...VERSION_HEADER },
+        };
+      } catch (err) {
+        console.error(
+          JSON.stringify({
+            level: "error",
+            msg: "authorize redirect failed",
+            error: err instanceof Error ? `${err.name}: ${err.message}` : String(err),
+          }),
+        );
+        return problem(502, "Bad Gateway", { detail: "Couldn't reach sign-in." }, VERSION_HEADER);
+      }
+    }
 
     if (method === "GET" && path === AUTH_SERVER_METADATA_PATH && deps.cognitoDiscovery) {
       try {

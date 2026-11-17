@@ -63,7 +63,7 @@ describe("api handler", () => {
     expect(res.statusCode).toBe(200);
     expect(JSON.parse(res.body ?? "")).toEqual({
       issuer: "https://test.execute-api.eu-west-1.amazonaws.com",
-      authorization_endpoint: `${AUTH}/oauth2/authorize`,
+      authorization_endpoint: "https://test.execute-api.eu-west-1.amazonaws.com/oauth/authorize",
       token_endpoint: `${AUTH}/oauth2/token`,
       revocation_endpoint: `${AUTH}/oauth2/revoke`,
       jwks_uri: `${ISSUER}/.well-known/jwks.json`,
@@ -73,6 +73,28 @@ describe("api handler", () => {
       token_endpoint_auth_methods_supported: ["none"],
       revocation_endpoint_auth_methods_supported: ["none"],
       scopes_supported: ["openid", "email", "profile"],
+    });
+  });
+
+  it("redirects /oauth/authorize to Cognito without the resource parameter", async () => {
+    const h = withDiscovery(() => Promise.resolve(COGNITO));
+    const event = httpEvent("GET", "/oauth/authorize");
+    event.rawQueryString =
+      "response_type=code&client_id=claude1&redirect_uri=https%3A%2F%2Fclaude.ai%2Fapi%2Fmcp%2Fauth_callback" +
+      "&scope=openid+email+profile&state=s1&code_challenge=c1&code_challenge_method=S256" +
+      "&resource=https%3A%2F%2Ftest.execute-api.eu-west-1.amazonaws.com%2Fmcp";
+    const res = await h(event);
+    expect(res.statusCode).toBe(302);
+    const location = new URL(String(res.headers?.location));
+    expect(`${location.origin}${location.pathname}`).toBe(`${AUTH}/oauth2/authorize`);
+    expect(Object.fromEntries(location.searchParams)).toEqual({
+      response_type: "code",
+      client_id: "claude1",
+      redirect_uri: "https://claude.ai/api/mcp/auth_callback",
+      scope: "openid email profile",
+      state: "s1",
+      code_challenge: "c1",
+      code_challenge_method: "S256",
     });
   });
 

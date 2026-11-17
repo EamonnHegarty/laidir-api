@@ -7,10 +7,33 @@
  * public (PKCE, no secret), and Claude picks an auth method from that list, so it sends Basic auth
  * with an empty secret, which Cognito rejects with `invalid_client`. This document is Cognito's,
  * with `issuer` set to our origin (RFC 8414 requires it to match where it's served) and the auth
- * method set to `none`, so Claude sends `client_id` in the body. Sign-in, token, revocation and
- * keys stay Cognito's; access tokens keep Cognito's `iss`, which the MCP server checks.
+ * method set to `none`, so Claude sends `client_id` in the body.
+ *
+ * Second Cognito quirk: an authorize request with an RFC 8707 `resource` parameter (which Claude
+ * always sends) is accepted, but redeeming its code then fails with `invalid_grant` when no Cognito
+ * resource server matches. So `authorization_endpoint` is our own redirect (AUTHORIZE_PATH), which
+ * forwards every parameter except `resource` to Cognito. `resource` on the token request is
+ * harmless (ignored). Tokens therefore have no `aud`; the MCP server binds them to itself by
+ * client instead (only the Claude client, which exists solely for this connector).
+ *
+ * Token, revocation and keys stay Cognito's; access tokens keep Cognito's `iss`.
  */
 export const AUTH_SERVER_METADATA_PATH = "/.well-known/oauth-authorization-server";
+
+/** Our authorize redirect (see above). */
+export const AUTHORIZE_PATH = "/oauth/authorize";
+
+/**
+ * Where to send the browser: Cognito's authorize endpoint with the same query, minus `resource`.
+ * Only ever redirects to Cognito; Cognito validates client_id and redirect_uri.
+ */
+export function authorizeRedirect(cognito: Record<string, unknown>, rawQuery: string): string {
+  const target = new URL(endpoint(cognito, "authorization_endpoint"));
+  const params = new URLSearchParams(rawQuery);
+  params.delete("resource");
+  target.search = params.toString();
+  return target.href;
+}
 
 /** What the Claude client may ask for (its allowed scopes in Cognito). */
 const SCOPES = ["openid", "email", "profile"];
@@ -51,7 +74,7 @@ function endpoint(doc: Record<string, unknown>, name: string): string {
 export function authServerMetadata(origin: string, cognito: Record<string, unknown>) {
   return {
     issuer: origin,
-    authorization_endpoint: endpoint(cognito, "authorization_endpoint"),
+    authorization_endpoint: `${origin}${AUTHORIZE_PATH}`,
     token_endpoint: endpoint(cognito, "token_endpoint"),
     revocation_endpoint: endpoint(cognito, "revocation_endpoint"),
     jwks_uri: endpoint(cognito, "jwks_uri"),

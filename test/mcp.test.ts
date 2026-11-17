@@ -58,11 +58,15 @@ describe("verifyAccessToken", () => {
     ["an ID token", { token_use: "id" }, "not an access token"],
     ["another client's token", { client_id: "mobileclient" }, "wrong client"],
     ["a token for another resource", { aud: "https://example.com/mcp" }, "wrong audience"],
-    ["a token without an audience", { aud: undefined }, "wrong audience"],
     ["a non-UUID sub", { sub: "admin" }, "bad sub"],
   ])("rejects %s", async (_, override, reason) => {
     const result = await verifyAccessToken(await sign({ ...good, ...override }), RESOURCE, cfg);
     expect(result).toEqual({ ok: false, reason });
+  });
+
+  it("accepts a Claude token without an audience (what Cognito issues)", async () => {
+    const result = await verifyAccessToken(await sign({ ...good, aud: undefined }), RESOURCE, cfg);
+    expect(result.ok).toBe(true);
   });
 
   it("rejects an expired token", async () => {

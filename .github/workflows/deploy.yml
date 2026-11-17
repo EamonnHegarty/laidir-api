@@ -113,6 +113,9 @@ jobs:
           jq -e --arg r "${API_ENDPOINT}/mcp" '.resource == $r' body.json
           check /.well-known/oauth-authorization-server 200
           jq -e '.token_endpoint_auth_methods_supported == ["none"]' body.json
+          check '/oauth/authorize?client_id=x&resource=https%3A%2F%2Fexample.com' 302
+          grep -i '^location: https://.*amazoncognito.com/oauth2/authorize?client_id=x' headers.txt
+          ! grep -i '^location:.*resource=' headers.txt
 
       - name: Summary
         if: always()
