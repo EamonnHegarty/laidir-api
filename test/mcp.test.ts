@@ -58,15 +58,11 @@ describe("verifyAccessToken", () => {
     ["an ID token", { token_use: "id" }, "not an access token"],
     ["another client's token", { client_id: "mobileclient" }, "wrong client"],
     ["a token for another resource", { aud: "https://example.com/mcp" }, "wrong audience"],
+    ["a token without an audience", { aud: undefined }, "wrong audience"],
     ["a non-UUID sub", { sub: "admin" }, "bad sub"],
   ])("rejects %s", async (_, override, reason) => {
     const result = await verifyAccessToken(await sign({ ...good, ...override }), RESOURCE, cfg);
     expect(result).toEqual({ ok: false, reason });
-  });
-
-  it("accepts a Claude token without an audience (what Cognito issues)", async () => {
-    const result = await verifyAccessToken(await sign({ ...good, aud: undefined }), RESOURCE, cfg);
-    expect(result.ok).toBe(true);
   });
 
   it("rejects an expired token", async () => {
@@ -102,6 +98,7 @@ function setup() {
   const handler = createHandler({
     store: () => store,
     now: () => new Date(NOW),
+    issuer: () => ISSUER,
     verify: (token, resource) => {
       const sub = ({ "token-a": SUB_A, "token-b": SUB_B } as Record<string, string>)[token];
       if (!sub || resource !== RESOURCE) return Promise.resolve({ ok: false, reason: "test" });
@@ -211,7 +208,7 @@ describe("mcp handler: discovery and auth", () => {
       expect(res.statusCode).toBe(200);
       expect(JSON.parse(res.body ?? "")).toEqual({
         resource: RESOURCE,
-        authorization_servers: [ORIGIN],
+        authorization_servers: [ISSUER],
         scopes_supported: ["openid", "email", "profile"],
         bearer_methods_supported: ["header"],
         resource_name: "Láidir",

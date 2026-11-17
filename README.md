@@ -59,16 +59,12 @@ test/         Vitest: handlers + schema fixtures
 - **Auth:** no gateway authorizer. Without a valid token `/mcp` answers `401` with
   `WWW-Authenticate: Bearer resource_metadata="<origin>/.well-known/oauth-protected-resource/mcp"`, which starts
   Claude's OAuth flow against Cognito. The Lambda verifies the access token itself (JWKS signature, issuer, expiry,
-  `token_use=access`, and the Claude client, which exists only for this connector and so binds the token to it.
-  Cognito issues these tokens without `aud`; if one has an `aud`, it must be the MCP URL).
+  `token_use=access`, the Claude client, and `aud` equal to the MCP URL: Claude sends the RFC 8707 `resource`
+  parameter and Cognito binds it into `aud`).
+  This needs a Cognito resource server whose identifier is the MCP URL (laidir-infra #15): without one, Cognito
+  accepts a resource-bound authorize request but fails the code exchange with `invalid_grant`.
 - **Metadata:** `GET /.well-known/oauth-protected-resource[/mcp]` (RFC 9728): `resource` is exactly `<origin>/mcp`
-  and `authorization_servers` is our own origin. `GET /.well-known/oauth-authorization-server` (RFC 8414, served by the
-  api Lambda on `$default`) is Cognito's discovery document with three fields changed: `issuer` = our origin;
-  `token_endpoint_auth_methods_supported: ["client_secret_post"]` (Cognito also lists Basic, and Basic with the public
-  client's empty secret fails with `invalid_client`; advertising only `none` made Claude stop before sign-in, as in
-  anthropics/claude-ai-mcp#1125); and `authorization_endpoint` = `GET /oauth/authorize`, a redirect to Cognito's that
-  drops `resource` (Cognito accepts a resource-bound authorize but then fails the code exchange with `invalid_grant`
-  without a matching Cognito resource server). Token, revocation and JWKS stay Cognito's.
+  and `authorization_servers` is the Cognito issuer.
 - **Tools** (every one has a title and annotations), using the same store, schemas and sync feed as `/v1`, scoped to
   the token's `sub`:
   - read-only: `search_exercises`, `list_routines`, `get_routine`, `list_workouts`, `get_workout`,
