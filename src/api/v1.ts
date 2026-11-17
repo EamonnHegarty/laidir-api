@@ -2,7 +2,8 @@ import type { APIGatewayProxyEventV2, APIGatewayProxyStructuredResultV2 } from "
 import type { components } from "../generated/openapi.js";
 import { VERSION_HEADER } from "../shared/build-info.js";
 import { json, problem } from "../shared/http.js";
-import { callerSub } from "./auth.js";
+import type { Accounts } from "./accounts.js";
+import { callerSub, callerUsername } from "./auth.js";
 import { type Entity, type EntityType, isEntityType, validateEntity } from "./entities.js";
 import type { Store } from "./store.js";
 
@@ -12,6 +13,7 @@ type PushResponse = components["schemas"]["PushResponse"];
 
 export interface V1Deps {
   store: () => Store;
+  accounts: () => Accounts;
   now: () => Date;
   allowedClientIds: () => readonly string[];
 }
@@ -50,6 +52,8 @@ export async function routeV1(
       return push(event, sub, deps);
     case "GET /v1/profile":
       return getProfile(sub, deps);
+    case "DELETE /v1/account":
+      return deleteAccount(sub, callerUsername(event, sub), deps);
     default:
       return fail(404, "Not Found", `No route for ${method} ${path}`);
   }
@@ -221,4 +225,27 @@ async function getProfile(sub: string, deps: V1Deps): Promise<APIGatewayProxyStr
   const profile = await deps.store().getProfile(sub);
   if (!profile) return fail(404, "Not Found", "No profile yet; push one first.");
   return reply(200, profile);
+}
+
+// ---------------------------------------------------------------------------
+// DELETE /v1/account
+// ---------------------------------------------------------------------------
+
+/**
+ * Deletes the caller's account and every item they have. Order makes a retry safe after any
+ * failure: sign out everywhere first (no device can push data back), then the data, then the
+ * Cognito user. Each step treats "already gone" as done.
+ */
+async function deleteAccount(
+  sub: string,
+  username: string,
+  deps: V1Deps,
+): Promise<APIGatewayProxyStructuredResultV2> {
+  const accounts = deps.accounts();
+  await accounts.signOutEverywhere(username);
+  const deleted = await deps.store().deleteAll(sub);
+  await accounts.deleteUser(username);
+  // Counts only: no identifiers in logs.
+  console.log(JSON.stringify({ level: "info", msg: "account deleted", items: deleted }));
+  return { statusCode: 204, headers: { ...VERSION_HEADER, "cache-control": "no-store" } };
 }

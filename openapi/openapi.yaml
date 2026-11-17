@@ -162,6 +162,25 @@ paths:
         "500":
           $ref: "#/components/responses/InternalError"
 
+  /v1/account:
+    delete:
+      operationId: deleteAccount
+      summary: Delete the signed-in user's account and all their data
+      description: |
+        Signs the user out on every device (revokes their refresh tokens), deletes every item they
+        have (all types, tombstones included), then deletes their Cognito user. Irreversible.
+        Retrying after a failure is safe; each step treats "already gone" as done.
+      tags: [profile]
+      responses:
+        "204":
+          description: The account and its data are deleted.
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "429":
+          $ref: "#/components/responses/TooManyRequests"
+        "500":
+          $ref: "#/components/responses/InternalError"
+
 components:
   securitySchemes:
     cognito:

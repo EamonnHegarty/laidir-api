@@ -37,6 +37,7 @@ CI fails if they're stale. Breaking entity changes need a new `schema_version` a
 | `GET /v1/sync?cursor=&limit=` | Changes since an opaque cursor, in server `synced_at` order (writes ≥ 2 s old)           |
 | `POST /v1/sync`               | Up to 25 whole items; each `applied`, `stale` (with the server's `current`) or `invalid` |
 | `GET /v1/profile`             | The caller's Profile (404 until first pushed)                                            |
+| `DELETE /v1/account`          | Signs out everywhere, deletes all the caller's items, then their Cognito user (204)      |
 
 `/v1` sits behind API Gateway's JWT authorizer (mobile and devtools Cognito clients). The handler only runs
 `/v1` logic when the route key is `ANY /v1/{proxy+}`, and every read and write is keyed on the token's `sub`.

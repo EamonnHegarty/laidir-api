@@ -1,5 +1,6 @@
 import { ConditionalCheckFailedException, DynamoDBClient } from "@aws-sdk/client-dynamodb";
 import {
+  BatchWriteCommand,
   DynamoDBDocumentClient,
   GetCommand,
   PutCommand,
@@ -30,6 +31,8 @@ export interface Store {
   /** Feed rows with position > `after` (exclusive; "" = from the start) and `synced_at` < `before`. */
   pull(sub: string, opts: { after: string; before: string; limit: number }): Promise<PullPage>;
   getProfile(sub: string): Promise<Entity | undefined>;
+  /** Deletes every item the user has (all types, tombstones included). Returns how many. */
+  deleteAll(sub: string): Promise<number>;
 }
 
 // ---------------------------------------------------------------------------
@@ -93,8 +96,12 @@ export function fromRow(row: Record<string, unknown>): Entity {
 
 /** The subset of DynamoDBDocumentClient used here (lets tests stub it). */
 export interface DocSender {
-  send(command: PutCommand | QueryCommand | GetCommand): Promise<unknown>;
+  send(command: PutCommand | QueryCommand | GetCommand | BatchWriteCommand): Promise<unknown>;
 }
+
+const BATCH_DELETE = 25;
+const MAX_BATCH_ATTEMPTS = 8;
+const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 
 export function createDocClient(): DynamoDBDocumentClient {
   return DynamoDBDocumentClient.from(new DynamoDBClient({}), {
@@ -167,6 +174,45 @@ export class DynamoStore implements Store {
 
   getProfile(sub: string): Promise<Entity | undefined> {
     return this.get(sub, "PROFILE", sub);
+  }
+
+  async deleteAll(sub: string): Promise<number> {
+    const pk = userPk(sub);
+    let deleted = 0;
+    let start: Record<string, unknown> | undefined;
+    do {
+      // Keys only. Every item of a user shares the partition key, so this finds all of them
+      // (GSI rows go with their items).
+      const page = (await this.client.send(
+        new QueryCommand({
+          TableName: this.tableName,
+          KeyConditionExpression: "PK = :pk",
+          ExpressionAttributeValues: { ":pk": pk },
+          ProjectionExpression: "PK, SK",
+          ExclusiveStartKey: start,
+        }),
+      )) as { Items?: { PK: string; SK: string }[]; LastEvaluatedKey?: Record<string, unknown> };
+      const keys = (page.Items ?? []).map(({ PK, SK }) => ({ PK, SK }));
+      for (let i = 0; i < keys.length; i += BATCH_DELETE) {
+        await this.deleteBatch(keys.slice(i, i + BATCH_DELETE));
+      }
+      deleted += keys.length;
+      start = page.LastEvaluatedKey;
+    } while (start);
+    return deleted;
+  }
+
+  /** BatchWriteItem deletes, retrying whatever DynamoDB leaves unprocessed (with backoff). */
+  private async deleteBatch(keys: { PK: string; SK: string }[]): Promise<void> {
+    let requests = keys.map((Key) => ({ DeleteRequest: { Key } }));
+    for (let attempt = 0; requests.length > 0; attempt++) {
+      if (attempt >= MAX_BATCH_ATTEMPTS) throw new Error("DynamoDB kept items unprocessed");
+      if (attempt > 0) await sleep(50 * 2 ** attempt);
+      const out = (await this.client.send(
+        new BatchWriteCommand({ RequestItems: { [this.tableName]: requests } }),
+      )) as { UnprocessedItems?: Record<string, typeof requests> };
+      requests = out.UnprocessedItems?.[this.tableName] ?? [];
+    }
   }
 
   private async get(sub: string, type: EntityType, id: string): Promise<Entity | undefined> {

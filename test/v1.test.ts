@@ -1,6 +1,7 @@
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import type { Accounts } from "../src/api/accounts.js";
 import type { Entity } from "../src/api/entities.js";
 import { createHandler } from "../src/api/index.js";
 import type { Store } from "../src/api/store.js";
@@ -26,8 +27,24 @@ const exerciseN = (n: number, updatedAt = "2026-11-16T10:00:00.000Z") => ({
 });
 
 let store: FakeStore;
+let accounts: { calls: string[] } & Accounts;
 let clock: Date;
 let handler: ReturnType<typeof createHandler>;
+
+function fakeAccounts(): { calls: string[] } & Accounts {
+  const calls: string[] = [];
+  return {
+    calls,
+    signOutEverywhere: (username) => {
+      calls.push(`signOut ${username}`);
+      return Promise.resolve();
+    },
+    deleteUser: (username) => {
+      calls.push(`delete ${username}`);
+      return Promise.resolve();
+    },
+  };
+}
 
 const tick = (ms: number) => {
   clock = new Date(clock.getTime() + ms);
@@ -46,9 +63,11 @@ async function pull(query: Record<string, string> = {}, sub = SUB_A) {
 
 beforeEach(() => {
   store = new FakeStore();
+  accounts = fakeAccounts();
   clock = new Date("2026-11-16T12:00:00.000Z");
   handler = createHandler({
     store: () => store,
+    accounts: () => accounts,
     now: () => clock,
     allowedClientIds: () => [MOBILE_CLIENT],
   });
@@ -87,10 +106,12 @@ describe("/v1 auth and routing", () => {
       put: () => Promise.reject(new Error("boom")),
       pull: () => Promise.reject(new Error("boom")),
       getProfile: () => Promise.reject(new Error("boom")),
+      deleteAll: () => Promise.reject(new Error("boom")),
     };
     const errors = vi.spyOn(console, "error").mockImplementation(() => undefined);
     const h = createHandler({
       store: () => failing,
+      accounts: () => fakeAccounts(),
       now: () => clock,
       allowedClientIds: () => [MOBILE_CLIENT],
     });
@@ -291,5 +312,60 @@ describe("GET /v1/profile", () => {
   it("never returns another user's profile", async () => {
     await push([PROFILE_A]);
     expect((await handler(v1Event("GET", "/v1/profile", { sub: SUB_B }))).statusCode).toBe(404);
+  });
+});
+
+describe("DELETE /v1/account", () => {
+  const deleteEvent = (sub = SUB_A, username?: string) => {
+    const claims = {
+      sub,
+      token_use: "access",
+      client_id: MOBILE_CLIENT,
+      ...(username ? { username } : {}),
+    };
+    return v1Event("DELETE", "/v1/account", { claims });
+  };
+
+  it("signs out everywhere, deletes all the caller's data, then the user, and nobody else's", async () => {
+    await push([PROFILE_A, EXERCISE, WORKOUT], SUB_A);
+    await push([exerciseN(9)], SUB_B);
+    const logs = vi.spyOn(console, "log").mockImplementation(() => undefined);
+
+    const res = await handler(deleteEvent(SUB_A, "cognito-username-a"));
+    expect(res.statusCode).toBe(204);
+    expect(res.body).toBeUndefined();
+    expect(accounts.calls).toEqual(["signOut cognito-username-a", "delete cognito-username-a"]);
+
+    settle();
+    expect(body(await pull({}, SUB_A))).toMatchObject({ items: [] });
+    expect((await handler(v1Event("GET", "/v1/profile"))).statusCode).toBe(404);
+    expect((body(await pull({}, SUB_B)) as { items: unknown[] }).items).toHaveLength(1);
+    // The log line has a count, never an identifier.
+    expect(JSON.stringify(logs.mock.calls)).not.toContain(SUB_A);
+    logs.mockRestore();
+  });
+
+  it("falls back to the sub when the token has no username claim", async () => {
+    await handler(deleteEvent(SUB_A));
+    expect(accounts.calls).toEqual([`signOut ${SUB_A}`, `delete ${SUB_A}`]);
+  });
+
+  it("is safe to retry after a failure (no data left, user deleted on the retry)", async () => {
+    await push([EXERCISE]);
+    const errors = vi.spyOn(console, "error").mockImplementation(() => undefined);
+    let failOnce = true;
+    accounts.deleteUser = () => {
+      if (failOnce) {
+        failOnce = false;
+        return Promise.reject(new Error("AccessDenied"));
+      }
+      accounts.calls.push("delete");
+      return Promise.resolve();
+    };
+    expect((await handler(deleteEvent())).statusCode).toBe(500);
+    expect(store.rows.size).toBe(0);
+    expect((await handler(deleteEvent())).statusCode).toBe(204);
+    expect(accounts.calls).toContain("delete");
+    errors.mockRestore();
   });
 });
