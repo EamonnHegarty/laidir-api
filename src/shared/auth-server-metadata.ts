@@ -2,14 +2,16 @@
  * RFC 8414 authorization server metadata for the Claude connector, served at
  * `<api origin>/.well-known/oauth-authorization-server`.
  *
- * Why not point Claude straight at Cognito: Cognito's discovery document lists only
- * `client_secret_basic` and `client_secret_post` as token endpoint auth methods. The Claude client is
- * public (PKCE, no secret), and Claude picks an auth method from that list, so it sends Basic auth
- * with an empty secret, which Cognito rejects with `invalid_client`. This document is Cognito's,
- * with `issuer` set to our origin (RFC 8414 requires it to match where it's served) and the auth
- * method set to `none`, so Claude sends `client_id` in the body.
+ * It's Cognito's discovery document with exactly three changes, because Claude's client is picky
+ * about this document's shape (an earlier version advertising only the `none` auth method made
+ * Claude stop before sign-in, as in anthropics/claude-ai-mcp#1125):
+ * - `issuer`: our origin (RFC 8414 requires it to match where the document is served).
+ * - `token_endpoint_auth_methods_supported`: `client_secret_post` only. Cognito lists Basic too,
+ *   and Basic with the Claude client's empty secret fails with `invalid_client`; an empty
+ *   `client_secret` in the body is accepted for this public client.
+ * - `authorization_endpoint`: our redirect, for the quirk below.
  *
- * Second Cognito quirk: an authorize request with an RFC 8707 `resource` parameter (which Claude
+ * Cognito quirk: an authorize request with an RFC 8707 `resource` parameter (which Claude
  * always sends) is accepted, but redeeming its code then fails with `invalid_grant` when no Cognito
  * resource server matches. So `authorization_endpoint` is our own redirect (AUTHORIZE_PATH), which
  * forwards every parameter except `resource` to Cognito. `resource` on the token request is
@@ -34,9 +36,6 @@ export function authorizeRedirect(cognito: Record<string, unknown>, rawQuery: st
   target.search = params.toString();
   return target.href;
 }
-
-/** What the Claude client may ask for (its allowed scopes in Cognito). */
-const SCOPES = ["openid", "email", "profile"];
 
 const CACHE_MS = 60 * 60 * 1000;
 let cached: { at: number; doc: Record<string, unknown> } | undefined;
@@ -70,19 +69,14 @@ function endpoint(doc: Record<string, unknown>, name: string): string {
   return value;
 }
 
-/** Our metadata, built from Cognito's discovery document. */
+/** Our metadata: Cognito's discovery document with the three changes described above. */
 export function authServerMetadata(origin: string, cognito: Record<string, unknown>) {
+  endpoint(cognito, "authorization_endpoint");
+  endpoint(cognito, "token_endpoint");
   return {
+    ...cognito,
     issuer: origin,
     authorization_endpoint: `${origin}${AUTHORIZE_PATH}`,
-    token_endpoint: endpoint(cognito, "token_endpoint"),
-    revocation_endpoint: endpoint(cognito, "revocation_endpoint"),
-    jwks_uri: endpoint(cognito, "jwks_uri"),
-    response_types_supported: ["code"],
-    grant_types_supported: ["authorization_code", "refresh_token"],
-    code_challenge_methods_supported: ["S256"],
-    token_endpoint_auth_methods_supported: ["none"],
-    revocation_endpoint_auth_methods_supported: ["none"],
-    scopes_supported: SCOPES,
+    token_endpoint_auth_methods_supported: ["client_secret_post"],
   };
 }

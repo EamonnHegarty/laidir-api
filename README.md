@@ -63,12 +63,12 @@ test/         Vitest: handlers + schema fixtures
   Cognito issues these tokens without `aud`; if one has an `aud`, it must be the MCP URL).
 - **Metadata:** `GET /.well-known/oauth-protected-resource[/mcp]` (RFC 9728): `resource` is exactly `<origin>/mcp`
   and `authorization_servers` is our own origin. `GET /.well-known/oauth-authorization-server` (RFC 8414, served by the
-  api Lambda on `$default`) is Cognito's discovery document with `issuer` = our origin and
-  `token_endpoint_auth_methods_supported: ["none"]`: Cognito lists only secret-based methods, so Claude would otherwise
-  send Basic auth with an empty secret, which Cognito rejects (`invalid_client`). Its `authorization_endpoint` is
-  `GET /oauth/authorize`, a redirect to Cognito's that drops `resource`: Cognito accepts a resource-bound authorize
-  but then fails the code exchange (`invalid_grant`) without a matching Cognito resource server. Token, revocation
-  and JWKS stay Cognito's.
+  api Lambda on `$default`) is Cognito's discovery document with three fields changed: `issuer` = our origin;
+  `token_endpoint_auth_methods_supported: ["client_secret_post"]` (Cognito also lists Basic, and Basic with the public
+  client's empty secret fails with `invalid_client`; advertising only `none` made Claude stop before sign-in, as in
+  anthropics/claude-ai-mcp#1125); and `authorization_endpoint` = `GET /oauth/authorize`, a redirect to Cognito's that
+  drops `resource` (Cognito accepts a resource-bound authorize but then fails the code exchange with `invalid_grant`
+  without a matching Cognito resource server). Token, revocation and JWKS stay Cognito's.
 - **Tools** (every one has a title and annotations), using the same store, schemas and sync feed as `/v1`, scoped to
   the token's `sub`:
   - read-only: `search_exercises`, `list_routines`, `get_routine`, `list_workouts`, `get_workout`,
