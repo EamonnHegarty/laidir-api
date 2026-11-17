@@ -1,12 +1,12 @@
 import { ConditionalCheckFailedException } from "@aws-sdk/client-dynamodb";
-import { GetCommand, PutCommand, QueryCommand } from "@aws-sdk/lib-dynamodb";
+import { BatchWriteCommand, GetCommand, PutCommand, QueryCommand } from "@aws-sdk/lib-dynamodb";
 import { marshall } from "@aws-sdk/util-dynamodb";
 import { describe, expect, it } from "vitest";
 import type { Entity } from "../src/api/entities.js";
 import { type DocSender, DynamoStore, sortKeyFromPosition } from "../src/api/store.js";
 import { SUB_A } from "./event.js";
 
-type Command = PutCommand | QueryCommand | GetCommand;
+type Command = PutCommand | QueryCommand | GetCommand | BatchWriteCommand;
 
 function stub(reply: (command: Command) => unknown) {
   const sent: Command[] = [];
@@ -123,6 +123,47 @@ describe("DynamoStore", () => {
       Key: { PK: `USER#${SUB_A}`, SK: "PROFILE" },
       ConsistentRead: true,
     });
+  });
+
+  it("deletes every item under the caller's partition, in batches of 25, retrying leftovers", async () => {
+    const keys = Array.from({ length: 30 }, (_, i) => ({
+      PK: `USER#${SUB_A}`,
+      SK: `EXERCISE#${String(i)}`,
+    }));
+    let firstBatch = true;
+    const { sent, store } = stub((command) => {
+      if (command instanceof QueryCommand) {
+        // Two pages: 20 keys, then 10.
+        return command.input.ExclusiveStartKey
+          ? { Items: keys.slice(20) }
+          : { Items: keys.slice(0, 20), LastEvaluatedKey: keys[19] };
+      }
+      if (command instanceof BatchWriteCommand && firstBatch) {
+        firstBatch = false;
+        const requests = command.input.RequestItems?.["laidir-test-data"] ?? [];
+        return { UnprocessedItems: { "laidir-test-data": requests.slice(0, 2) } };
+      }
+      return {};
+    });
+
+    expect(await store.deleteAll(SUB_A)).toBe(30);
+    const queries = sent.filter((c) => c instanceof QueryCommand);
+    expect(queries[0]?.input).toMatchObject({
+      KeyConditionExpression: "PK = :pk",
+      ExpressionAttributeValues: { ":pk": `USER#${SUB_A}` },
+      ProjectionExpression: "PK, SK",
+    });
+    expect(queries).toHaveLength(2);
+    const deletedKeys = sent
+      .filter((c) => c instanceof BatchWriteCommand)
+      .flatMap((c) => c.input.RequestItems?.["laidir-test-data"] ?? [])
+      .map((r) => String((r.DeleteRequest?.Key as { SK?: unknown } | undefined)?.SK));
+    // 30 deletes + the 2 retried ones, never more than 25 per request.
+    expect(deletedKeys).toHaveLength(32);
+    expect(new Set(deletedKeys).size).toBe(30);
+    for (const c of sent.filter((c) => c instanceof BatchWriteCommand)) {
+      expect(c.input.RequestItems?.["laidir-test-data"]?.length).toBeLessThanOrEqual(25);
+    }
   });
 
   it("maps a profile feed position back to its table key", () => {

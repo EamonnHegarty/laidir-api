@@ -71,6 +71,28 @@ export interface paths {
     patch?: never;
     trace?: never;
   };
+  "/v1/account": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    post?: never;
+    /**
+     * Delete the signed-in user's account and all their data
+     * @description Signs the user out on every device (revokes their refresh tokens), deletes every item they
+     *     have (all types, tombstones included), then deletes their Cognito user. Irreversible.
+     *     Retrying after a failure is safe; each step treats "already gone" as done.
+     */
+    delete: operations["deleteAccount"];
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
 }
 export type webhooks = Record<string, never>;
 export interface components {
@@ -523,6 +545,27 @@ export interface operations {
       };
       401: components["responses"]["Unauthorized"];
       404: components["responses"]["NotFound"];
+      429: components["responses"]["TooManyRequests"];
+      500: components["responses"]["InternalError"];
+    };
+  };
+  deleteAccount: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description The account and its data are deleted. */
+      204: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content?: never;
+      };
+      401: components["responses"]["Unauthorized"];
       429: components["responses"]["TooManyRequests"];
       500: components["responses"]["InternalError"];
     };

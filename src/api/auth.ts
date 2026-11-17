@@ -28,6 +28,16 @@ export function callerSub(
   return sub;
 }
 
+/**
+ * The caller's Cognito username (the access token's `username` claim; with email sign-in it's a
+ * UUID). Falls back to the sub, which Cognito's admin APIs also accept. Only call this after
+ * callerSub() succeeded.
+ */
+export function callerUsername(event: APIGatewayProxyEventV2, sub: string): string {
+  const username = (event.requestContext as JwtContext).authorizer?.jwt?.claims?.username;
+  return typeof username === "string" && username.length > 0 ? username : sub;
+}
+
 /** App client IDs whose access tokens /v1 accepts (set by Terraform). */
 export function allowedClientIdsFromEnv(env: NodeJS.ProcessEnv = process.env): string[] {
   return [env.MOBILE_CLIENT_ID, env.DEVTOOLS_CLIENT_ID].filter(

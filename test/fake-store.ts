@@ -43,6 +43,17 @@ export class FakeStore implements Store {
     return Promise.resolve({ rows, hasMore: page.length === opts.limit });
   }
 
+  deleteAll(sub: string): Promise<number> {
+    let n = 0;
+    for (const [key, row] of this.rows) {
+      if (row.PK === userPk(sub)) {
+        this.rows.delete(key);
+        n++;
+      }
+    }
+    return Promise.resolve(n);
+  }
+
   getProfile(sub: string): Promise<Entity | undefined> {
     const row = this.rows.get(`${userPk(sub)}|PROFILE`);
     return Promise.resolve(row ? fromRow(structuredClone(row)) : undefined);

@@ -2,6 +2,7 @@ import type { APIGatewayProxyEventV2, APIGatewayProxyStructuredResultV2 } from "
 import type { components } from "../generated/openapi.js";
 import { SCHEMA_VERSION, VERSION, VERSION_HEADER } from "../shared/build-info.js";
 import { json, problem } from "../shared/http.js";
+import { type Accounts, CognitoAccounts, createCognitoClient } from "./accounts.js";
 import { allowedClientIdsFromEnv } from "./auth.js";
 import { DynamoStore, createDocClient, type Store } from "./store.js";
 import { routeV1, type V1Deps } from "./v1.js";
@@ -62,6 +63,7 @@ export function createHandler(deps: V1Deps) {
 }
 
 let store: Store | undefined;
+let accounts: Accounts | undefined;
 
 export const handler = createHandler({
   store: () => {
@@ -71,6 +73,14 @@ export const handler = createHandler({
       store = new DynamoStore(createDocClient(), tableName);
     }
     return store;
+  },
+  accounts: () => {
+    if (!accounts) {
+      const userPoolId = process.env.USER_POOL_ID;
+      if (!userPoolId) throw new Error("USER_POOL_ID is not set");
+      accounts = new CognitoAccounts(createCognitoClient(), userPoolId);
+    }
+    return accounts;
   },
   now: () => new Date(),
   allowedClientIds: () => allowedClientIdsFromEnv(),
