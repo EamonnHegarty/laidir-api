@@ -252,18 +252,24 @@ export class DynamoStore implements Store {
   ): Promise<Entity[]> {
     const items: Entity[] = [];
     let start: Record<string, unknown> | undefined;
+    // GSI1 sort key is `<started_at>#<id>`, so a string range on it is a date range. DynamoDB
+    // rejects an empty string in a key condition, so with no `from` there's only an upper bound.
+    const values: Record<string, string> = {
+      ":pk": `${userPk(sub)}#WORKOUT`,
+      ":to": `${opts.to ?? WORKOUT_KEY_MAX}#${WORKOUT_KEY_MAX}`,
+    };
+    let range = "GSI1SK <= :to";
+    if (opts.from) {
+      values[":from"] = opts.from;
+      range = "GSI1SK BETWEEN :from AND :to";
+    }
     do {
-      // GSI1 sort key is `<started_at>#<id>`, so a string range on it is a date range.
       const page = (await this.client.send(
         new QueryCommand({
           TableName: this.tableName,
           IndexName: "GSI1",
-          KeyConditionExpression: "GSI1PK = :pk AND GSI1SK BETWEEN :from AND :to",
-          ExpressionAttributeValues: {
-            ":pk": `${userPk(sub)}#WORKOUT`,
-            ":from": opts.from ?? "",
-            ":to": `${opts.to ?? WORKOUT_KEY_MAX}#${WORKOUT_KEY_MAX}`,
-          },
+          KeyConditionExpression: `GSI1PK = :pk AND ${range}`,
+          ExpressionAttributeValues: values,
           ScanIndexForward: false,
           Limit: opts.limit - items.length,
           ExclusiveStartKey: start,
