@@ -166,6 +166,44 @@ describe("DynamoStore", () => {
     }
   });
 
+  it("lists one type by sort-key prefix, following pages", async () => {
+    let page = 0;
+    const { sent, store } = stub(() =>
+      page++ === 0
+        ? { Items: [{ ...EXERCISE, PK: "x", SK: "y" }], LastEvaluatedKey: { PK: "x", SK: "y" } }
+        : { Items: [] },
+    );
+    const items = await store.list(SUB_A, "ROUTINE");
+    expect(items).toEqual([EXERCISE]);
+    expect(sent).toHaveLength(2);
+    expect((sent[0] as QueryCommand).input).toMatchObject({
+      KeyConditionExpression: "PK = :pk AND begins_with(SK, :prefix)",
+      // The trailing # keeps ROUTINE_FOLDER# items out.
+      ExpressionAttributeValues: { ":pk": `USER#${SUB_A}`, ":prefix": "ROUTINE#" },
+    });
+    expect((sent[1] as QueryCommand).input.ExclusiveStartKey).toEqual({ PK: "x", SK: "y" });
+  });
+
+  it("reads workouts newest first from GSI1 within a date range", async () => {
+    const { sent, store } = stub(() => ({ Items: [] }));
+    await store.workouts(SUB_A, {
+      from: "2026-11-01T00:00:00.000Z",
+      to: "2026-11-30T23:59:59.999Z",
+      limit: 20,
+    });
+    expect((sent[0] as QueryCommand).input).toMatchObject({
+      IndexName: "GSI1",
+      KeyConditionExpression: "GSI1PK = :pk AND GSI1SK BETWEEN :from AND :to",
+      ExpressionAttributeValues: {
+        ":pk": `USER#${SUB_A}#WORKOUT`,
+        ":from": "2026-11-01T00:00:00.000Z",
+        ":to": "2026-11-30T23:59:59.999Z#￿",
+      },
+      ScanIndexForward: false,
+      Limit: 20,
+    });
+  });
+
   it("maps a profile feed position back to its table key", () => {
     expect(sortKeyFromPosition(`2026-11-16T11:00:00.000Z#PROFILE#${SUB_A}`)).toBe("PROFILE");
     expect(sortKeyFromPosition(`2026-11-16T11:00:00.000Z#ROUTINE_FOLDER#abc`)).toBe(

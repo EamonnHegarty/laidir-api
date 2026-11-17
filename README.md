@@ -45,11 +45,29 @@ Writes are conditional on `updated_at` (last writer wins); a retried write repor
 
 ```
 src/api/      REST Lambda (laidir-<env>-api): GET /health, /v1/sync, /v1/profile
-src/mcp/      MCP Lambda (laidir-<env>-mcp): /mcp, /.well-known/oauth-protected-resource (phase 4)
+src/mcp/      MCP Lambda (laidir-<env>-mcp): /mcp (Claude connector), /.well-known/oauth-protected-resource
 src/shared/   HTTP helpers (RFC 9457 problems), build info
 scripts/      esbuild bundling
 test/         Vitest: handlers + schema fixtures
 ```
+
+## MCP server (Claude connector)
+
+`/mcp` is a remote MCP server (Streamable HTTP, stateless, built on `@modelcontextprotocol/server` v2). It serves
+2026-07-28 clients and, through the SDK's stateless fallback, 2025-era clients that start with `initialize`.
+
+- **Auth:** no gateway authorizer. Without a valid token `/mcp` answers `401` with
+  `WWW-Authenticate: Bearer resource_metadata="<origin>/.well-known/oauth-protected-resource/mcp"`, which starts
+  Claude's OAuth flow against Cognito. The Lambda verifies the access token itself (JWKS signature, issuer, expiry,
+  `token_use=access`, the Claude client, and `aud` equal to the MCP URL: Claude sends the RFC 8707 `resource`
+  parameter and Cognito binds it into `aud`).
+- **Metadata:** `GET /.well-known/oauth-protected-resource[/mcp]` (RFC 9728): `resource` is exactly `<origin>/mcp`
+  and `authorization_servers` is the Cognito issuer.
+- **Tools** (every one has a title and annotations): `search_exercises`, `list_routines`, `get_routine`,
+  `list_workouts`, `get_workout`, `get_exercise_history`. They use the same store and data as `/v1`, scoped to the
+  token's `sub`.
+- **Connecting:** Claude → Settings → Connectors → Add custom connector, URL `<api_endpoint>/mcp`, and under
+  advanced settings the `claude_client_id` from laidir-infra (Cognito has no dynamic client registration).
 
 ## Development
 
@@ -85,7 +103,7 @@ acts only on the signed-in user's own data.
 ```
 PR ─► checks: format · lint · spec lint · generated files fresh · typecheck · test · build
 merge to main ─► deploy (GitHub Environment "prod", OIDC role laidir-gha-api-deploy-prod)
-                 build → update-function-code (api, mcp) → wait → smoke test /health + /mcp
+                 build → update-function-code (api, mcp) → wait → smoke test /health, /mcp (401), MCP metadata
 ```
 
 - The deploy role can only update code on the two functions. Terraform owns their configuration.

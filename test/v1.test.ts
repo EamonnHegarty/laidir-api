@@ -107,6 +107,9 @@ describe("/v1 auth and routing", () => {
       pull: () => Promise.reject(new Error("boom")),
       getProfile: () => Promise.reject(new Error("boom")),
       deleteAll: () => Promise.reject(new Error("boom")),
+      get: () => Promise.reject(new Error("boom")),
+      list: () => Promise.reject(new Error("boom")),
+      workouts: () => Promise.reject(new Error("boom")),
     };
     const errors = vi.spyOn(console, "error").mockImplementation(() => undefined);
     const h = createHandler({
