@@ -1,3 +1,4 @@
+import { Buffer } from "node:buffer";
 import { createMcpHandler, McpServer } from "@modelcontextprotocol/server";
 import type { APIGatewayProxyEventV2, APIGatewayProxyStructuredResultV2 } from "aws-lambda";
 import { createDocClient, DynamoStore, type Store } from "../api/store.js";
@@ -25,6 +26,8 @@ export interface McpDeps {
   now: () => Date;
   issuer: () => string;
   verify: (token: string, resource: string) => Promise<Verified>;
+  /** Overrides the stall deadline (tests). */
+  deadlineMs?: number;
 }
 
 /** One McpServer per request (stateless), bound to the verified caller. */
@@ -66,13 +69,77 @@ function unauthorized(
   );
 }
 
-const log = (level: "warn" | "error", msg: string, fields: Record<string, unknown>) => {
+const log = (level: "info" | "warn" | "error", msg: string, fields: Record<string, unknown>) => {
   // No request bodies or tokens in logs.
-  console[level](JSON.stringify({ level, msg, ...fields }));
+  const line = JSON.stringify({ level, msg, ...fields });
+  if (level === "info") console.log(line);
+  else console[level](line);
 };
 
 const errorText = (err: unknown) =>
   err instanceof Error ? `${err.name}: ${err.message}` : String(err);
+
+/** Longest a /mcp request may take before it's logged and answered as stalled. */
+const DEADLINE_MS = 10_000;
+
+/** What a request is, for logs: HTTP method, JSON-RPC method names and protocol version only. */
+export function describeRequest(event: APIGatewayProxyEventV2) {
+  let rpc: string[];
+  try {
+    const raw = event.isBase64Encoded
+      ? Buffer.from(event.body ?? "", "base64").toString("utf8")
+      : (event.body ?? "");
+    const parsed: unknown = raw ? JSON.parse(raw) : undefined;
+    const messages = Array.isArray(parsed) ? parsed : parsed === undefined ? [] : [parsed];
+    rpc = messages.map((m) => {
+      const message = m as { method?: unknown; params?: { name?: unknown } } | null;
+      const name = typeof message?.method === "string" ? message.method : "(response)";
+      const tool = message?.params?.name;
+      return name === "tools/call" && typeof tool === "string" ? `${name}:${tool}` : name;
+    });
+  } catch {
+    rpc = ["(unparseable)"];
+  }
+  return {
+    http: event.requestContext.http.method,
+    rpc,
+    protocol: event.headers["mcp-protocol-version"] ?? "(none)",
+    bytes: event.body?.length ?? 0,
+    requestId: event.requestContext.requestId,
+  };
+}
+
+/** The request being handled, for the process-level hooks below. */
+let inFlight: ReturnType<typeof describeRequest> | undefined;
+
+// These only report; they don't change how the process behaves on a crash.
+process.on("beforeExit", () => {
+  // Node ran out of work while a request was still waiting: Lambda reports this as
+  // "Runtime exited without providing a reason".
+  if (inFlight) log("error", "event loop drained mid-request", inFlight);
+});
+process.on("uncaughtExceptionMonitor", (err, origin) => {
+  log("error", "uncaught exception", { origin, error: errorText(err), request: inFlight });
+});
+
+class Stalled extends Error {
+  override name = "Stalled";
+}
+
+/** Resolves like `work`, or rejects with Stalled after `ms`. Keeps the event loop busy meanwhile. */
+async function withDeadline<T>(work: Promise<T>, ms: number): Promise<T> {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const deadline = new Promise<never>((_, reject) => {
+    timer = setTimeout(() => {
+      reject(new Stalled(`no response after ${String(ms)} ms`));
+    }, ms);
+  });
+  try {
+    return await Promise.race([work, deadline]);
+  } finally {
+    clearTimeout(timer);
+  }
+}
 
 /**
  * MCP Lambda (laidir-<env>-mcp). API Gateway routes here, with no authorizer:
@@ -128,17 +195,34 @@ export function createHandler(deps: McpDeps) {
       return unauthorized(metadataUrl, true);
     }
 
+    const info = describeRequest(event);
+    const started = Date.now();
+    inFlight = info;
     try {
-      const res = await mcp.fetch(toRequest(event), { authInfo: verified.auth });
-      return await fromResponse(res, { ...VERSION_HEADER, "cache-control": "no-store" });
+      const result = await withDeadline(
+        (async () => {
+          const res = await mcp.fetch(toRequest(event), { authInfo: verified.auth });
+          return fromResponse(res, { ...VERSION_HEADER, "cache-control": "no-store" });
+        })(),
+        deps.deadlineMs ?? DEADLINE_MS,
+      );
+      log("info", "mcp request", { ...info, status: result.statusCode, ms: Date.now() - started });
+      return result;
     } catch (err) {
-      log("error", "mcp request failed", { requestId, error: errorText(err) });
+      const stalled = err instanceof Stalled;
+      log("error", stalled ? "mcp request stalled" : "mcp request failed", {
+        ...info,
+        ms: Date.now() - started,
+        error: errorText(err),
+      });
       return problem(
-        500,
-        "Internal Server Error",
-        { detail: "Something went wrong." },
+        stalled ? 504 : 500,
+        stalled ? "Gateway Timeout" : "Internal Server Error",
+        { detail: "Something went wrong. Retrying is safe." },
         VERSION_HEADER,
       );
+    } finally {
+      inFlight = undefined;
     }
   };
 }
