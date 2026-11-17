@@ -281,12 +281,16 @@ describe("mcp handler: protocol", () => {
       annotations?: { readOnlyHint?: boolean; destructiveHint?: boolean };
     }[];
     expect(tools.map((t) => t.name).sort()).toEqual([
+      "create_custom_exercise",
+      "create_routine",
+      "delete_routine",
       "get_exercise_history",
       "get_routine",
       "get_workout",
       "list_routines",
       "list_workouts",
       "search_exercises",
+      "update_routine",
     ]);
     for (const t of tools) {
       expect(t.title, t.name).toBeTruthy();
@@ -468,5 +472,175 @@ describe("read tools", () => {
     expect(routine.isError).toBe(true);
     const workout = await tool(handler, "get_workout", { workout_id: WORKOUT_1 }, "token-b");
     expect(workout.isError).toBe(true);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Write tools
+// ---------------------------------------------------------------------------
+
+describe("write tools", () => {
+  const PUSH = {
+    name: "Push Day",
+    exercises: [
+      {
+        exercise_id: "builtin:barbell-bench-press",
+        rest_seconds: 150,
+        sets: [
+          { target_reps_min: 6, target_reps_max: 8 },
+          { target_reps_min: 6, target_reps_max: 8 },
+        ],
+      },
+    ],
+  };
+
+  it("create_routine writes a valid routine that the app's sync feed picks up", async () => {
+    const { store, handler } = setup();
+    await seed(store);
+    const { data, isError } = await tool(handler, "create_routine", {
+      ...PUSH,
+      folder_id: FOLDER_ID,
+    });
+    expect(isError).toBe(false);
+    const created = data.created as Record<string, unknown>;
+    expect(created).toMatchObject({
+      type: "ROUTINE",
+      name: "Push Day",
+      folder_id: FOLDER_ID,
+      created_at: NOW,
+      updated_at: NOW,
+      deleted_at: null,
+      // After Upper A (no sort_order, so 0) in the same folder.
+      sort_order: 1000,
+    });
+    expect(created).not.toHaveProperty("notes");
+
+    const stored = await store.get(SUB_A, "ROUTINE", created.id as string);
+    expect(stored).toMatchObject({
+      exercises: [
+        {
+          exercise_id: "builtin:barbell-bench-press",
+          rest_seconds: 150,
+          sets: [
+            { set_type: "normal", target_reps_min: 6, target_reps_max: 8 },
+            { set_type: "normal", target_reps_min: 6, target_reps_max: 8 },
+          ],
+        },
+      ],
+    });
+    // Same feed /v1/sync pulls from: the app gets it on its next sync.
+    const feed = await store.pull(SUB_A, { after: "", before: "9999", limit: 100 });
+    expect(feed.rows.map((r) => r.entity.id)).toContain(created.id);
+  });
+
+  it("create_routine rejects unknown exercises and folders without writing", async () => {
+    const { store, handler } = setup();
+    await seed(store);
+    const before = store.rows.size;
+    const bad = await tool(handler, "create_routine", {
+      name: "X",
+      exercises: [{ exercise_id: "builtin:made-up-lift", sets: [{}] }],
+    });
+    expect(bad.isError).toBe(true);
+    expect(bad.text).toContain("builtin:made-up-lift");
+    const noFolder = await tool(handler, "create_routine", {
+      ...PUSH,
+      folder_id: "99999999-9999-4999-8999-999999999999",
+    });
+    expect(noFolder.isError).toBe(true);
+    expect(store.rows.size).toBe(before);
+  });
+
+  it("update_routine changes only what it's given, with a later updated_at", async () => {
+    const { store, handler } = setup();
+    await seed(store);
+    const { data, isError } = await tool(handler, "update_routine", {
+      routine_id: ROUTINE_ID,
+      name: "Upper A (heavy)",
+      notes: "Go heavy",
+      folder_id: null,
+    });
+    expect(isError).toBe(false);
+    const updated = data.updated as Record<string, unknown>;
+    expect(updated).toMatchObject({ name: "Upper A (heavy)", notes: "Go heavy", updated_at: NOW });
+    expect(updated).not.toHaveProperty("folder_id");
+    expect((updated.exercises as unknown[]).length).toBe(2);
+
+    const cleared = await tool(handler, "update_routine", { routine_id: ROUTINE_ID, notes: null });
+    // Same clock: the write still lands, 1 ms later, so last-writer-wins keeps it.
+    expect(cleared.data.updated).toMatchObject({ updated_at: "2026-11-17T12:00:00.001Z" });
+    expect(cleared.data.updated).not.toHaveProperty("notes");
+  });
+
+  it("update_routine replaces the exercise list", async () => {
+    const { store, handler } = setup();
+    await seed(store);
+    await tool(handler, "update_routine", { routine_id: ROUTINE_ID, exercises: PUSH.exercises });
+    const stored = (await store.get(SUB_A, "ROUTINE", ROUTINE_ID)) as unknown as {
+      exercises: { exercise_id: string }[];
+    };
+    expect(stored.exercises.map((e) => e.exercise_id)).toEqual(["builtin:barbell-bench-press"]);
+  });
+
+  it("delete_routine leaves a tombstone that syncs", async () => {
+    const { store, handler } = setup();
+    await seed(store);
+    const { isError } = await tool(handler, "delete_routine", { routine_id: ROUTINE_ID });
+    expect(isError).toBe(false);
+    expect(await store.get(SUB_A, "ROUTINE", ROUTINE_ID)).toMatchObject({ deleted_at: NOW });
+    const list = await tool(handler, "list_routines");
+    expect(list.data).toEqual({
+      folders: [{ id: FOLDER_ID, name: "Upper/Lower", routines: [] }],
+      unfiled: [],
+    });
+    const again = await tool(handler, "delete_routine", { routine_id: ROUTINE_ID });
+    expect(again.isError).toBe(true);
+  });
+
+  it("create_custom_exercise adds one, refuses duplicates, and it can be used in a routine", async () => {
+    const { store, handler } = setup();
+    await seed(store);
+    const { data } = await tool(handler, "create_custom_exercise", {
+      name: "Belt Squat",
+      equipment: "machine",
+      primary_muscle: "quads",
+      secondary_muscles: ["quads", "glutes"],
+    });
+    const created = data.created as { id: string; tracking: string; secondary_muscles: string[] };
+    expect(created.tracking).toBe("weight_reps");
+    expect(created.secondary_muscles).toEqual(["glutes"]);
+
+    const dup = await tool(handler, "create_custom_exercise", {
+      name: "belt squat",
+      equipment: "machine",
+      primary_muscle: "quads",
+    });
+    expect(dup.isError).toBe(true);
+    expect(dup.text).toContain(created.id);
+
+    const routine = await tool(handler, "create_routine", {
+      name: "Legs",
+      exercises: [{ exercise_id: created.id, sets: [{ target_reps_min: 10 }] }],
+    });
+    expect(routine.isError).toBe(false);
+  });
+
+  it("can't change another user's routine", async () => {
+    const { store, handler } = setup();
+    await seed(store, SUB_A);
+    const update = await tool(
+      handler,
+      "update_routine",
+      { routine_id: ROUTINE_ID, name: "Mine" },
+      "token-b",
+    );
+    expect(update.isError).toBe(true);
+    const del = await tool(handler, "delete_routine", { routine_id: ROUTINE_ID }, "token-b");
+    expect(del.isError).toBe(true);
+    expect(await store.get(SUB_A, "ROUTINE", ROUTINE_ID)).toMatchObject({
+      name: "Upper A",
+      deleted_at: null,
+    });
+    expect(await store.get(SUB_B, "ROUTINE", ROUTINE_ID)).toBeUndefined();
   });
 });
