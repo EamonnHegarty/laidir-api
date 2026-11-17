@@ -1,9 +1,10 @@
-import type { Entity } from "../src/api/entities.js";
+import type { Entity, EntityType } from "../src/api/entities.js";
 import {
   type FeedRow,
   type PullPage,
   type PutOutcome,
   type Store,
+  WORKOUT_KEY_MAX,
   fromRow,
   sortKey,
   toRow,
@@ -55,7 +56,30 @@ export class FakeStore implements Store {
   }
 
   getProfile(sub: string): Promise<Entity | undefined> {
-    const row = this.rows.get(`${userPk(sub)}|PROFILE`);
+    return this.get(sub, "PROFILE", sub);
+  }
+
+  get(sub: string, type: EntityType, id: string): Promise<Entity | undefined> {
+    const row = this.rows.get(`${userPk(sub)}|${sortKey(type, id)}`);
     return Promise.resolve(row ? fromRow(structuredClone(row)) : undefined);
+  }
+
+  list(sub: string, type: Exclude<EntityType, "PROFILE" | "WORKOUT">): Promise<Entity[]> {
+    const items = [...this.rows.values()]
+      .filter((row) => row.PK === userPk(sub) && String(row.SK).startsWith(`${type}#`))
+      .sort((a, b) => (String(a.SK) < String(b.SK) ? -1 : 1))
+      .map((row) => fromRow(structuredClone(row)));
+    return Promise.resolve(items);
+  }
+
+  workouts(sub: string, opts: { from?: string; to?: string; limit: number }): Promise<Entity[]> {
+    const to = `${opts.to ?? WORKOUT_KEY_MAX}#${WORKOUT_KEY_MAX}`;
+    const items = [...this.rows.values()]
+      .filter((row) => row.GSI1PK === `${userPk(sub)}#WORKOUT`)
+      .filter((row) => String(row.GSI1SK) >= (opts.from ?? "") && String(row.GSI1SK) <= to)
+      .sort((a, b) => (String(a.GSI1SK) < String(b.GSI1SK) ? 1 : -1))
+      .slice(0, opts.limit)
+      .map((row) => fromRow(structuredClone(row)));
+    return Promise.resolve(items);
   }
 }

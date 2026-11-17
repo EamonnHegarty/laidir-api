@@ -33,7 +33,19 @@ export interface Store {
   getProfile(sub: string): Promise<Entity | undefined>;
   /** Deletes every item the user has (all types, tombstones included). Returns how many. */
   deleteAll(sub: string): Promise<number>;
+  /** One item (tombstones included), or undefined. Strongly consistent. */
+  get(sub: string, type: EntityType, id: string): Promise<Entity | undefined>;
+  /** Every item of one type (tombstones included). Not for WORKOUT: use `workouts`. */
+  list(sub: string, type: Exclude<EntityType, "PROFILE" | "WORKOUT">): Promise<Entity[]>;
+  /**
+   * Workouts newest first by `started_at` (tombstones included), at most `limit`.
+   * `from`/`to` bound `started_at` (inclusive, ISO-8601).
+   */
+  workouts(sub: string, opts: { from?: string; to?: string; limit: number }): Promise<Entity[]>;
 }
+
+/** The upper bound for a `<started_at>#<id>` sort key that starts on or before `to`. */
+export const WORKOUT_KEY_MAX = "￿";
 
 // ---------------------------------------------------------------------------
 // Key layout (laidir-infra docs/access-patterns.md)
@@ -215,7 +227,55 @@ export class DynamoStore implements Store {
     }
   }
 
-  private async get(sub: string, type: EntityType, id: string): Promise<Entity | undefined> {
+  async list(sub: string, type: Exclude<EntityType, "PROFILE" | "WORKOUT">): Promise<Entity[]> {
+    const items: Entity[] = [];
+    let start: Record<string, unknown> | undefined;
+    do {
+      // The trailing `#` matters: `ROUTINE#` must not match `ROUTINE_FOLDER#...`.
+      const page = (await this.client.send(
+        new QueryCommand({
+          TableName: this.tableName,
+          KeyConditionExpression: "PK = :pk AND begins_with(SK, :prefix)",
+          ExpressionAttributeValues: { ":pk": userPk(sub), ":prefix": `${type}#` },
+          ExclusiveStartKey: start,
+        }),
+      )) as { Items?: Record<string, unknown>[]; LastEvaluatedKey?: Record<string, unknown> };
+      for (const row of page.Items ?? []) items.push(fromRow(row));
+      start = page.LastEvaluatedKey;
+    } while (start);
+    return items;
+  }
+
+  async workouts(
+    sub: string,
+    opts: { from?: string; to?: string; limit: number },
+  ): Promise<Entity[]> {
+    const items: Entity[] = [];
+    let start: Record<string, unknown> | undefined;
+    do {
+      // GSI1 sort key is `<started_at>#<id>`, so a string range on it is a date range.
+      const page = (await this.client.send(
+        new QueryCommand({
+          TableName: this.tableName,
+          IndexName: "GSI1",
+          KeyConditionExpression: "GSI1PK = :pk AND GSI1SK BETWEEN :from AND :to",
+          ExpressionAttributeValues: {
+            ":pk": `${userPk(sub)}#WORKOUT`,
+            ":from": opts.from ?? "",
+            ":to": `${opts.to ?? WORKOUT_KEY_MAX}#${WORKOUT_KEY_MAX}`,
+          },
+          ScanIndexForward: false,
+          Limit: opts.limit - items.length,
+          ExclusiveStartKey: start,
+        }),
+      )) as { Items?: Record<string, unknown>[]; LastEvaluatedKey?: Record<string, unknown> };
+      for (const row of page.Items ?? []) items.push(fromRow(row));
+      start = page.LastEvaluatedKey;
+    } while (start && items.length < opts.limit);
+    return items;
+  }
+
+  async get(sub: string, type: EntityType, id: string): Promise<Entity | undefined> {
     const out = (await this.client.send(
       new GetCommand({
         TableName: this.tableName,
