@@ -108,7 +108,9 @@ jobs:
           }
           check /health 200
           jq -e --arg v "$EXPECTED" '.status == "ok" and .version == $v' body.json
-          check /mcp 503
+          check /mcp 401
+          check /.well-known/oauth-protected-resource/mcp 200
+          jq -e --arg r "${API_ENDPOINT}/mcp" '.resource == $r' body.json
 
       - name: Summary
         if: always()
