@@ -4,8 +4,8 @@ import { execSync } from "node:child_process";
 import { rmSync, statSync } from "node:fs";
 import { build } from "esbuild";
 
-const FUNCTIONS = ["api", "mcp"];
-const MAX_BYTES = 1_000_000; // Guard rail: a phase-1 bundle is a few KB.
+// Size guard rails per bundle (unminified). mcp carries the MCP SDK and zod (~1.5 MB).
+const FUNCTIONS = { api: 1_000_000, mcp: 2_000_000 };
 
 function gitSha() {
   try {
@@ -18,7 +18,7 @@ function gitSha() {
 const version = process.env.LAIDIR_VERSION ?? gitSha();
 rmSync("dist", { recursive: true, force: true });
 
-for (const name of FUNCTIONS) {
+for (const [name, maxBytes] of Object.entries(FUNCTIONS)) {
   const outfile = `dist/${name}/index.mjs`;
   await build({
     entryPoints: [`src/${name}/index.ts`],
@@ -38,8 +38,8 @@ for (const name of FUNCTIONS) {
   });
   const bytes = statSync(outfile).size;
   console.log(`${outfile}  ${(bytes / 1024).toFixed(1)} KiB`);
-  if (bytes > MAX_BYTES) {
-    console.error(`${outfile} is over ${MAX_BYTES} bytes; check for an accidental dependency.`);
+  if (bytes > maxBytes) {
+    console.error(`${outfile} is over ${maxBytes} bytes; check for an accidental dependency.`);
     process.exit(1);
   }
 }
