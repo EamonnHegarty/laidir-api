@@ -12,9 +12,13 @@ export const MCP_PATH = "/mcp";
 const METADATA_PATH = "/.well-known/oauth-protected-resource";
 
 const INSTRUCTIONS = `Láidir is the user's gym tracker. These tools read and change the same data the Láidir app shows; changes reach the app the next time it syncs.
-- Weights are stored in kg. weight_unit_preference says how the user likes to see them; convert when you talk to them.
-- Exercises are referenced by id: "builtin:<slug>" for the built-in catalogue or a UUID for the user's own. Use search_exercises to find ids; never invent them.
-- Before update_routine, read the routine with get_routine: a new exercises list replaces the old one. Ask before deleting anything.`;
+Use the app's words with the user:
+- A Program (e.g. "Push Pull Legs") groups Workouts. Tools: list_programs, create_program, update_program, delete_program.
+- A Workout (e.g. "Push Day") is a plan the user starts in the app: ordered exercises with target sets. Tools: get_workout, create_workout, update_workout, delete_workout. Create a Program first, then each Workout with its program_id.
+- A Session is one logged training session (the app's History). Tools: list_sessions, get_session, get_exercise_history. Sessions are read-only here.
+Weights are stored in kg; weight_unit_preference says how the user likes to see them, so convert when you talk to them.
+Exercises are referenced by id: "builtin:<slug>" for the built-in catalogue or a UUID for the user's own. Use search_exercises to find ids; never invent them.
+Before update_workout with exercises, read the workout with get_workout: a new exercises list replaces the old one. Ask before deleting anything.`;
 
 export interface McpDeps {
   store: () => Store;
