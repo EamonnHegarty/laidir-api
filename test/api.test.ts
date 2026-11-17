@@ -57,22 +57,16 @@ describe("api handler", () => {
     expect((await handler(httpEvent("POST", "/health"))).statusCode).toBe(404);
   });
 
-  it("serves the connector's authorization server metadata: Cognito's endpoints, public client", async () => {
+  it("serves the connector's authorization server metadata: Cognito's, three fields changed", async () => {
     const h = withDiscovery(() => Promise.resolve(COGNITO));
     const res = await h(httpEvent("GET", "/.well-known/oauth-authorization-server"));
     expect(res.statusCode).toBe(200);
+    // Cognito's document with exactly three fields changed.
     expect(JSON.parse(res.body ?? "")).toEqual({
+      ...COGNITO,
       issuer: "https://test.execute-api.eu-west-1.amazonaws.com",
       authorization_endpoint: "https://test.execute-api.eu-west-1.amazonaws.com/oauth/authorize",
-      token_endpoint: `${AUTH}/oauth2/token`,
-      revocation_endpoint: `${AUTH}/oauth2/revoke`,
-      jwks_uri: `${ISSUER}/.well-known/jwks.json`,
-      response_types_supported: ["code"],
-      grant_types_supported: ["authorization_code", "refresh_token"],
-      code_challenge_methods_supported: ["S256"],
-      token_endpoint_auth_methods_supported: ["none"],
-      revocation_endpoint_auth_methods_supported: ["none"],
-      scopes_supported: ["openid", "email", "profile"],
+      token_endpoint_auth_methods_supported: ["client_secret_post"],
     });
   });
 
