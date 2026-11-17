@@ -78,3 +78,51 @@ describe("mcp handler: stalls and logging", () => {
     errors.mockRestore();
   });
 });
+
+describe("mcp handler: change subscriptions", () => {
+  const MODERN = "2026-07-28";
+  const meta = {
+    "io.modelcontextprotocol/protocolVersion": MODERN,
+    "io.modelcontextprotocol/clientInfo": { name: "claude", version: "1" },
+    "io.modelcontextprotocol/clientCapabilities": {},
+  };
+  function modernEvent(method: string, params: Record<string, unknown> = {}) {
+    const event = mcpEvent({ jsonrpc: "2.0", id: 9, method, params: { ...params, _meta: meta } });
+    event.headers["mcp-protocol-version"] = MODERN;
+    event.headers["mcp-method"] = method;
+    return event;
+  }
+  const handler = createHandler({
+    store: () => new FakeStore(),
+    now: () => new Date(),
+    issuer: () => "https://issuer.example",
+    verify: (token) =>
+      Promise.resolve({
+        ok: true,
+        sub: SUB_A,
+        auth: { token, clientId: "c", scopes: [], extra: { sub: SUB_A } },
+      }),
+  });
+
+  it("declines subscriptions/listen straight away instead of holding a stream open", async () => {
+    const logs = vi.spyOn(console, "log").mockImplementation(() => undefined);
+    const started = Date.now();
+    const res = await handler(
+      modernEvent("subscriptions/listen", { notifications: { toolsListChanged: true } }),
+    );
+    expect(Date.now() - started).toBeLessThan(1000);
+    expect(res.statusCode).toBe(404);
+    expect(JSON.parse(res.body ?? "")).toMatchObject({ id: 9, error: { code: -32601 } });
+    logs.mockRestore();
+  });
+
+  it("doesn't advertise tool list changes", async () => {
+    const logs = vi.spyOn(console, "log").mockImplementation(() => undefined);
+    const res = await handler(modernEvent("server/discover"));
+    const body = JSON.parse(res.body ?? "") as {
+      result: { capabilities: { tools?: { listChanged?: boolean } } };
+    };
+    expect(body.result.capabilities.tools?.listChanged ?? false).toBe(false);
+    logs.mockRestore();
+  });
+});

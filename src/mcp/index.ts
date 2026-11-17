@@ -34,7 +34,12 @@ export interface McpDeps {
 export function createServer(deps: ToolDeps): McpServer {
   const server = new McpServer(
     { name: "laidir", title: "Láidir", version: VERSION },
-    { instructions: INSTRUCTIONS },
+    {
+      instructions: INSTRUCTIONS,
+      // The tool list only changes on deploy, and Lambda can't hold the stream that
+      // subscriptions/listen needs, so don't invite clients to listen for changes.
+      capabilities: { tools: { listChanged: false } },
+    },
   );
   registerReadTools(server, deps);
   registerWriteTools(server, deps);
@@ -107,6 +112,19 @@ export function describeRequest(event: APIGatewayProxyEventV2) {
     bytes: event.body?.length ?? 0,
     requestId: event.requestContext.requestId,
   };
+}
+
+/** The JSON-RPC id of a single-message body (for answering it directly), or null. */
+function requestIdOf(event: APIGatewayProxyEventV2): string | number | null {
+  try {
+    const raw = event.isBase64Encoded
+      ? Buffer.from(event.body ?? "", "base64").toString("utf8")
+      : (event.body ?? "");
+    const id = (JSON.parse(raw) as { id?: unknown }).id;
+    return typeof id === "string" || typeof id === "number" ? id : null;
+  } catch {
+    return null;
+  }
 }
 
 /** The request being handled, for the process-level hooks below. */
@@ -196,6 +214,21 @@ export function createHandler(deps: McpDeps) {
     }
 
     const info = describeRequest(event);
+    // subscriptions/listen asks for a stream that stays open; Lambda returns whole responses
+    // only, so it would wait forever (this was the "Runtime exited" crash). Decline it at once,
+    // the way the SDK answers any method a server doesn't offer.
+    if (info.rpc.length === 1 && info.rpc[0] === "subscriptions/listen") {
+      log("info", "mcp request", { ...info, status: 404, ms: 0, declined: true });
+      return json(
+        404,
+        {
+          jsonrpc: "2.0",
+          id: requestIdOf(event),
+          error: { code: -32601, message: "Method not found: this server can't stream changes" },
+        },
+        VERSION_HEADER,
+      );
+    }
     const started = Date.now();
     inFlight = info;
     try {

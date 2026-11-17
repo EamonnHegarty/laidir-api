@@ -73,6 +73,9 @@ export class FakeStore implements Store {
   }
 
   workouts(sub: string, opts: { from?: string; to?: string; limit: number }): Promise<Entity[]> {
+    if (opts.from === "" || opts.to === "") {
+      return Promise.reject(new Error("key attribute cannot contain an empty string value"));
+    }
     const to = `${opts.to ?? WORKOUT_KEY_MAX}#${WORKOUT_KEY_MAX}`;
     const items = [...this.rows.values()]
       .filter((row) => row.GSI1PK === `${userPk(sub)}#WORKOUT`)

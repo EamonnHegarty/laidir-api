@@ -204,6 +204,16 @@ describe("DynamoStore", () => {
     });
   });
 
+  it("reads all workouts without an empty-string key value (DynamoDB rejects those)", async () => {
+    const { sent, store } = stub(() => ({ Items: [] }));
+    await store.workouts(SUB_A, { limit: 20 });
+    const input = (sent[0] as QueryCommand).input;
+    expect(input.KeyConditionExpression).toBe("GSI1PK = :pk AND GSI1SK <= :to");
+    for (const value of Object.values(input.ExpressionAttributeValues ?? {})) {
+      expect(value).not.toBe("");
+    }
+  });
+
   it("maps a profile feed position back to its table key", () => {
     expect(sortKeyFromPosition(`2026-11-16T11:00:00.000Z#PROFILE#${SUB_A}`)).toBe("PROFILE");
     expect(sortKeyFromPosition(`2026-11-16T11:00:00.000Z#ROUTINE_FOLDER#abc`)).toBe(
