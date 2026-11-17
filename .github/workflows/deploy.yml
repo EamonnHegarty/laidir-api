@@ -111,6 +111,8 @@ jobs:
           check /mcp 401
           check /.well-known/oauth-protected-resource/mcp 200
           jq -e --arg r "${API_ENDPOINT}/mcp" '.resource == $r' body.json
+          check /.well-known/oauth-authorization-server 200
+          jq -e '.token_endpoint_auth_methods_supported == ["none"]' body.json
 
       - name: Summary
         if: always()

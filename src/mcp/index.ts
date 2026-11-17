@@ -19,7 +19,6 @@ const INSTRUCTIONS = `Láidir is the user's gym tracker. These tools read and ch
 export interface McpDeps {
   store: () => Store;
   now: () => Date;
-  issuer: () => string;
   verify: (token: string, resource: string) => Promise<Verified>;
 }
 
@@ -34,11 +33,15 @@ export function createServer(deps: ToolDeps): McpServer {
   return server;
 }
 
-/** RFC 9728 protected resource metadata for this MCP server. */
-export function resourceMetadata(resource: string, issuer: string) {
+/**
+ * RFC 9728 protected resource metadata for this MCP server. The authorization server is our own
+ * origin, which serves Cognito's metadata with the public-client fix (see
+ * src/shared/auth-server-metadata.ts); tokens still come from Cognito.
+ */
+export function resourceMetadata(resource: string, authorizationServer: string) {
   return {
     resource,
-    authorization_servers: [issuer],
+    authorization_servers: [authorizationServer],
     scopes_supported: [...SCOPES],
     bearer_methods_supported: ["header"],
     resource_name: "Láidir",
@@ -101,7 +104,7 @@ export function createHandler(deps: McpDeps) {
     const metadataUrl = `${origin}${METADATA_PATH}${MCP_PATH}`;
 
     if (path === METADATA_PATH || path === `${METADATA_PATH}${MCP_PATH}`) {
-      return json(200, resourceMetadata(resource, deps.issuer()), {
+      return json(200, resourceMetadata(resource, origin), {
         ...VERSION_HEADER,
         "cache-control": "public, max-age=300",
       });
@@ -151,7 +154,6 @@ let keys: ReturnType<typeof cognitoKeys> | undefined;
 export const handler = createHandler({
   store: () => (store ??= new DynamoStore(createDocClient(), env("TABLE_NAME"))),
   now: () => new Date(),
-  issuer: () => env("COGNITO_ISSUER"),
   verify: (token, resource) => {
     const issuer = env("COGNITO_ISSUER");
     keys ??= cognitoKeys(issuer);

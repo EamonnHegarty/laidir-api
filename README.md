@@ -62,7 +62,10 @@ test/         Vitest: handlers + schema fixtures
   `token_use=access`, the Claude client, and `aud` equal to the MCP URL: Claude sends the RFC 8707 `resource`
   parameter and Cognito binds it into `aud`).
 - **Metadata:** `GET /.well-known/oauth-protected-resource[/mcp]` (RFC 9728): `resource` is exactly `<origin>/mcp`
-  and `authorization_servers` is the Cognito issuer.
+  and `authorization_servers` is our own origin. `GET /.well-known/oauth-authorization-server` (RFC 8414, served by the
+  api Lambda on `$default`) is Cognito's discovery document with `issuer` = our origin and
+  `token_endpoint_auth_methods_supported: ["none"]`: Cognito lists only secret-based methods, so Claude would otherwise
+  send Basic auth with an empty secret, which Cognito rejects (`invalid_client`). All endpoints stay Cognito's.
 - **Tools** (every one has a title and annotations), using the same store, schemas and sync feed as `/v1`, scoped to
   the token's `sub`:
   - read-only: `search_exercises`, `list_routines`, `get_routine`, `list_workouts`, `get_workout`,
