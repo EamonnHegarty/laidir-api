@@ -98,7 +98,6 @@ function setup() {
   const handler = createHandler({
     store: () => store,
     now: () => new Date(NOW),
-    issuer: () => ISSUER,
     verify: (token, resource) => {
       const sub = ({ "token-a": SUB_A, "token-b": SUB_B } as Record<string, string>)[token];
       if (!sub || resource !== RESOURCE) return Promise.resolve({ ok: false, reason: "test" });
@@ -208,7 +207,7 @@ describe("mcp handler: discovery and auth", () => {
       expect(res.statusCode).toBe(200);
       expect(JSON.parse(res.body ?? "")).toEqual({
         resource: RESOURCE,
-        authorization_servers: [ISSUER],
+        authorization_servers: [ORIGIN],
         scopes_supported: ["openid", "email", "profile"],
         bearer_methods_supported: ["header"],
         resource_name: "Láidir",

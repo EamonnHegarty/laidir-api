@@ -1,6 +1,33 @@
-import { describe, expect, it } from "vitest";
-import { handler } from "../src/api/index.js";
+import { describe, expect, it, vi } from "vitest";
+import { createHandler, handler } from "../src/api/index.js";
+import { cognitoDiscovery, clearDiscoveryCache } from "../src/shared/auth-server-metadata.js";
 import { httpEvent } from "./event.js";
+import { FakeStore } from "./fake-store.js";
+
+const ISSUER = "https://cognito-idp.eu-west-1.amazonaws.com/eu-west-1_test";
+const AUTH = "https://laidir-test.auth.eu-west-1.amazoncognito.com";
+// The parts of Cognito's real discovery document that matter here.
+const COGNITO = {
+  issuer: ISSUER,
+  authorization_endpoint: `${AUTH}/oauth2/authorize`,
+  token_endpoint: `${AUTH}/oauth2/token`,
+  revocation_endpoint: `${AUTH}/oauth2/revoke`,
+  jwks_uri: `${ISSUER}/.well-known/jwks.json`,
+  token_endpoint_auth_methods_supported: ["client_secret_basic", "client_secret_post"],
+  scopes_supported: ["openid", "email", "phone", "profile"],
+};
+
+function withDiscovery(discovery: () => Promise<Record<string, unknown>>) {
+  return createHandler({
+    store: () => new FakeStore(),
+    accounts: () => {
+      throw new Error("unused");
+    },
+    now: () => new Date(),
+    allowedClientIds: () => [],
+    cognitoDiscovery: discovery,
+  });
+}
 
 describe("api handler", () => {
   it("GET /health returns 200 with the version", async () => {
@@ -28,5 +55,49 @@ describe("api handler", () => {
 
   it("only answers GET on /health", async () => {
     expect((await handler(httpEvent("POST", "/health"))).statusCode).toBe(404);
+  });
+
+  it("serves the connector's authorization server metadata: Cognito's endpoints, public client", async () => {
+    const h = withDiscovery(() => Promise.resolve(COGNITO));
+    const res = await h(httpEvent("GET", "/.well-known/oauth-authorization-server"));
+    expect(res.statusCode).toBe(200);
+    expect(JSON.parse(res.body ?? "")).toEqual({
+      issuer: "https://test.execute-api.eu-west-1.amazonaws.com",
+      authorization_endpoint: `${AUTH}/oauth2/authorize`,
+      token_endpoint: `${AUTH}/oauth2/token`,
+      revocation_endpoint: `${AUTH}/oauth2/revoke`,
+      jwks_uri: `${ISSUER}/.well-known/jwks.json`,
+      response_types_supported: ["code"],
+      grant_types_supported: ["authorization_code", "refresh_token"],
+      code_challenge_methods_supported: ["S256"],
+      token_endpoint_auth_methods_supported: ["none"],
+      revocation_endpoint_auth_methods_supported: ["none"],
+      scopes_supported: ["openid", "email", "profile"],
+    });
+  });
+
+  it("answers 502 when Cognito's discovery can't be read", async () => {
+    const errors = vi.spyOn(console, "error").mockImplementation(() => undefined);
+    const h = withDiscovery(() => Promise.reject(new Error("timeout")));
+    const res = await h(httpEvent("GET", "/.well-known/oauth-authorization-server"));
+    expect(res.statusCode).toBe(502);
+    errors.mockRestore();
+  });
+});
+
+describe("cognitoDiscovery", () => {
+  it("fetches the issuer's OpenID configuration once an hour", async () => {
+    clearDiscoveryCache();
+    const fetchFn = vi.fn(() => Promise.resolve(Response.json(COGNITO)));
+    await cognitoDiscovery(ISSUER, fetchFn, 0);
+    await cognitoDiscovery(ISSUER, fetchFn, 59 * 60 * 1000);
+    expect(fetchFn).toHaveBeenCalledTimes(1);
+    expect(fetchFn).toHaveBeenCalledWith(
+      `${ISSUER}/.well-known/openid-configuration`,
+      expect.anything(),
+    );
+    await cognitoDiscovery(ISSUER, fetchFn, 61 * 60 * 1000);
+    expect(fetchFn).toHaveBeenCalledTimes(2);
+    clearDiscoveryCache();
   });
 });
