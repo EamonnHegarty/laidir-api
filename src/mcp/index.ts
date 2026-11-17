@@ -6,13 +6,15 @@ import { json, problem } from "../shared/http.js";
 import { bearerToken, cognitoKeys, SCOPES, type Verified, verifyAccessToken } from "./auth.js";
 import { fromResponse, toRequest } from "./lambda-http.js";
 import { registerReadTools, type ToolDeps } from "./tools-read.js";
+import { registerWriteTools } from "./tools-write.js";
 
 export const MCP_PATH = "/mcp";
 const METADATA_PATH = "/.well-known/oauth-protected-resource";
 
 const INSTRUCTIONS = `Láidir is the user's gym tracker. These tools read and change the same data the Láidir app shows; changes reach the app the next time it syncs.
 - Weights are stored in kg. weight_unit_preference says how the user likes to see them; convert when you talk to them.
-- Exercises are referenced by id: "builtin:<slug>" for the built-in catalogue or a UUID for the user's own. Use search_exercises to find ids; never invent them.`;
+- Exercises are referenced by id: "builtin:<slug>" for the built-in catalogue or a UUID for the user's own. Use search_exercises to find ids; never invent them.
+- Before update_routine, read the routine with get_routine: a new exercises list replaces the old one. Ask before deleting anything.`;
 
 export interface McpDeps {
   store: () => Store;
@@ -28,6 +30,7 @@ export function createServer(deps: ToolDeps): McpServer {
     { instructions: INSTRUCTIONS },
   );
   registerReadTools(server, deps);
+  registerWriteTools(server, deps);
   return server;
 }
 

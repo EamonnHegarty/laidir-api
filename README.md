@@ -63,9 +63,13 @@ test/         Vitest: handlers + schema fixtures
   parameter and Cognito binds it into `aud`).
 - **Metadata:** `GET /.well-known/oauth-protected-resource[/mcp]` (RFC 9728): `resource` is exactly `<origin>/mcp`
   and `authorization_servers` is the Cognito issuer.
-- **Tools** (every one has a title and annotations): `search_exercises`, `list_routines`, `get_routine`,
-  `list_workouts`, `get_workout`, `get_exercise_history`. They use the same store and data as `/v1`, scoped to the
-  token's `sub`.
+- **Tools** (every one has a title and annotations), using the same store, schemas and sync feed as `/v1`, scoped to
+  the token's `sub`:
+  - read-only: `search_exercises`, `list_routines`, `get_routine`, `list_workouts`, `get_workout`,
+    `get_exercise_history`
+  - writes: `create_routine`, `update_routine`, `delete_routine` (a tombstone), `create_custom_exercise`. Items are
+    validated against `schemas/v1` and stamped with the server clock (strictly after the stored `updated_at`, so
+    last-writer-wins keeps them); the app picks them up on its next sync.
 - **Connecting:** Claude → Settings → Connectors → Add custom connector, URL `<api_endpoint>/mcp`, and under
   advanced settings the `claude_client_id` from laidir-infra (Cognito has no dynamic client registration).
 
