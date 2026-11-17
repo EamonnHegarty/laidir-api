@@ -65,13 +65,18 @@ test/         Vitest: handlers + schema fixtures
   accepts a resource-bound authorize request but fails the code exchange with `invalid_grant`.
 - **Metadata:** `GET /.well-known/oauth-protected-resource[/mcp]` (RFC 9728): `resource` is exactly `<origin>/mcp`
   and `authorization_servers` is the Cognito issuer.
-- **Tools** (every one has a title and annotations), using the same store, schemas and sync feed as `/v1`, scoped to
-  the token's `sub`:
-  - read-only: `search_exercises`, `list_routines`, `get_routine`, `list_workouts`, `get_workout`,
-    `get_exercise_history`
-  - writes: `create_routine`, `update_routine`, `delete_routine` (a tombstone), `create_custom_exercise`. Items are
-    validated against `schemas/v1` and stamped with the server clock (strictly after the stored `updated_at`, so
-    last-writer-wins keeps them); the app picks them up on its next sync.
+- **Tools** (every one has a title and annotations) use the app's words, not the contract's: a **Program** is a
+  `RoutineFolder`, a **Workout** is a `Routine` (a plan you start), a **Session** is a logged `Workout`. Same store,
+  schemas and sync feed as `/v1`, scoped to the token's `sub`:
+  - Programs: `list_programs`, `create_program`, `update_program`, `delete_program` (its workouts are kept, moved
+    out of the Program, unless `delete_workouts`)
+  - Workouts: `get_workout`, `create_workout` (all exercises in one call, optional `program_id`), `update_workout`,
+    `delete_workout`
+  - Sessions (read-only): `list_sessions`, `get_session`, `get_exercise_history`
+  - Exercises: `search_exercises` (plurals, joined forms like "pullups", abbreviations like "rdl"/"ohp"/"db"),
+    `create_custom_exercise`
+  - Writes are validated against `schemas/v1` and stamped with the server clock (strictly after the stored
+    `updated_at`, so last-writer-wins keeps them); deletes are tombstones; the app picks them up on its next sync.
 - **Connecting:** Claude → Settings → Connectors → Add custom connector, URL `<api_endpoint>/mcp`, and under
   advanced settings the `claude_client_id` from laidir-infra (Cognito has no dynamic client registration).
 

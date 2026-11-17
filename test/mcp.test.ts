@@ -269,7 +269,7 @@ describe("mcp handler: protocol", () => {
     );
     expect(list.statusCode, list.body).toBe(200);
     const listBody = parseRpc(list.body) as { result: { tools: { name: string }[] } };
-    expect(listBody.result.tools.map((t) => t.name)).toContain("list_routines");
+    expect(listBody.result.tools.map((t) => t.name)).toContain("list_programs");
   });
 
   it("serves modern (2026-07-28) clients and annotates every tool", async () => {
@@ -282,15 +282,18 @@ describe("mcp handler: protocol", () => {
     }[];
     expect(tools.map((t) => t.name).sort()).toEqual([
       "create_custom_exercise",
-      "create_routine",
-      "delete_routine",
+      "create_program",
+      "create_workout",
+      "delete_program",
+      "delete_workout",
       "get_exercise_history",
-      "get_routine",
+      "get_session",
       "get_workout",
-      "list_routines",
-      "list_workouts",
+      "list_programs",
+      "list_sessions",
       "search_exercises",
-      "update_routine",
+      "update_program",
+      "update_workout",
     ]);
     for (const t of tools) {
       expect(t.title, t.name).toBeTruthy();
@@ -357,6 +360,7 @@ async function seed(store: FakeStore, sub = SUB_A) {
   await put({
     ...base("WORKOUT", WORKOUT_1),
     name: "Upper A",
+    routine_id: ROUTINE_ID,
     started_at: "2026-11-10T08:00:00.000Z",
     ended_at: "2026-11-10T09:00:00.000Z",
     exercises: [
@@ -376,6 +380,8 @@ async function seed(store: FakeStore, sub = SUB_A) {
   });
 }
 
+const ids = (list: unknown) => (list as { id: string }[]).map((x) => x.id);
+
 describe("read tools", () => {
   it("search_exercises finds built-in and custom exercises", async () => {
     const { store, handler } = setup();
@@ -390,16 +396,32 @@ describe("read tools", () => {
     expect(shoulders.data.total).toBeGreaterThan(1);
   });
 
-  it("list_routines groups live routines by folder", async () => {
+  it.each([
+    ["barbell rows", "builtin:barbell-row"],
+    ["pull ups", "builtin:pull-up"],
+    ["pullups", "builtin:pull-up"],
+    ["rdl", "builtin:barbell-romanian-deadlift"],
+    ["ohp", "builtin:barbell-overhead-press"],
+    ["db curls", "builtin:dumbbell-curl"],
+    ["squats", "builtin:barbell-back-squat"],
+    ["incline db press", "builtin:dumbbell-incline-bench-press"],
+  ])("search_exercises understands %j", async (query, id) => {
+    const { handler } = setup();
+    const { data } = await tool(handler, "search_exercises", { query, limit: 10 });
+    expect(ids(data.exercises)).toContain(id);
+  });
+
+  it("list_programs groups live workouts by program", async () => {
     const { store, handler } = setup();
     await seed(store);
-    const { data } = await tool(handler, "list_routines");
+    const { data } = await tool(handler, "list_programs");
     expect(data).toEqual({
-      folders: [
+      programs: [
         {
           id: FOLDER_ID,
           name: "Upper/Lower",
-          routines: [
+          updated_at: "2026-11-01T10:00:00.000Z",
+          workouts: [
             {
               id: ROUTINE_ID,
               name: "Upper A",
@@ -410,25 +432,27 @@ describe("read tools", () => {
           ],
         },
       ],
-      unfiled: [],
+      workouts_without_program: [],
     });
   });
 
-  it("get_routine adds exercise names", async () => {
+  it("get_workout returns the plan with exercise names and its program", async () => {
     const { store, handler } = setup();
     await seed(store);
-    const { data } = await tool(handler, "get_routine", { routine_id: ROUTINE_ID });
+    const { data } = await tool(handler, "get_workout", { workout_id: ROUTINE_ID });
+    expect(data).toMatchObject({ id: ROUTINE_ID, name: "Upper A", program_id: FOLDER_ID });
+    expect(data).not.toHaveProperty("folder_id");
     expect((data.exercises as { name: string }[]).map((e) => e.name)).toEqual([
       "Bench Press (Barbell)",
       "Laidir Special Press",
     ]);
   });
 
-  it("list_workouts returns newest first with totals and honours dates", async () => {
+  it("list_sessions returns newest first with totals and honours dates", async () => {
     const { store, handler } = setup();
     await seed(store);
-    const all = await tool(handler, "list_workouts");
-    expect(all.data.workouts).toEqual([
+    const all = await tool(handler, "list_sessions");
+    expect(all.data.sessions).toEqual([
       expect.objectContaining({
         id: WORKOUT_2,
         duration_min: 70,
@@ -437,15 +461,25 @@ describe("read tools", () => {
       }),
       expect.objectContaining({
         id: WORKOUT_1,
+        from_workout_id: ROUTINE_ID,
         duration_min: 60,
         completed_sets: 2,
         volume_kg: 800,
       }),
     ]);
-    const early = await tool(handler, "list_workouts", { to: "2026-11-10" });
-    expect((early.data.workouts as { id: string }[]).map((w) => w.id)).toEqual([WORKOUT_1]);
-    const late = await tool(handler, "list_workouts", { from: "2026-11-11" });
-    expect((late.data.workouts as { id: string }[]).map((w) => w.id)).toEqual([WORKOUT_2]);
+    const early = await tool(handler, "list_sessions", { to: "2026-11-10" });
+    expect(ids(early.data.sessions)).toEqual([WORKOUT_1]);
+    const late = await tool(handler, "list_sessions", { from: "2026-11-11" });
+    expect(ids(late.data.sessions)).toEqual([WORKOUT_2]);
+  });
+
+  it("get_session returns the logged sets with names", async () => {
+    const { store, handler } = setup();
+    await seed(store);
+    const { data } = await tool(handler, "get_session", { session_id: WORKOUT_1 });
+    expect(data).toMatchObject({ id: WORKOUT_1, from_workout_id: ROUTINE_ID });
+    expect(data).not.toHaveProperty("routine_id");
+    expect((data.exercises as { name: string }[])[0]?.name).toBe("Bench Press (Barbell)");
   });
 
   it("get_exercise_history reports sessions and the best set", async () => {
@@ -461,17 +495,18 @@ describe("read tools", () => {
       date: "2026-11-14T08:00:00.000Z",
     });
     expect(data.sessions).toHaveLength(2);
+    expect((data.sessions as { session_id: string }[])[0]?.session_id).toBe(WORKOUT_2);
   });
 
   it("never shows another user's data", async () => {
     const { store, handler } = setup();
     await seed(store, SUB_A);
-    const routines = await tool(handler, "list_routines", {}, "token-b");
-    expect(routines.data).toEqual({ folders: [], unfiled: [] });
-    const routine = await tool(handler, "get_routine", { routine_id: ROUTINE_ID }, "token-b");
-    expect(routine.isError).toBe(true);
-    const workout = await tool(handler, "get_workout", { workout_id: WORKOUT_1 }, "token-b");
+    const programs = await tool(handler, "list_programs", {}, "token-b");
+    expect(programs.data).toEqual({ programs: [], workouts_without_program: [] });
+    const workout = await tool(handler, "get_workout", { workout_id: ROUTINE_ID }, "token-b");
     expect(workout.isError).toBe(true);
+    const session = await tool(handler, "get_session", { session_id: WORKOUT_1 }, "token-b");
+    expect(session.isError).toBe(true);
   });
 });
 
@@ -491,32 +526,41 @@ describe("write tools", () => {
           { target_reps_min: 6, target_reps_max: 8 },
         ],
       },
+      { exercise_id: "builtin:barbell-overhead-press", sets: [{ target_reps_min: 8 }] },
     ],
   };
 
-  it("create_routine writes a valid routine that the app's sync feed picks up", async () => {
+  it("builds a program with two workouts that the app's sync feed picks up", async () => {
     const { store, handler } = setup();
     await seed(store);
-    const { data, isError } = await tool(handler, "create_routine", {
-      ...PUSH,
-      folder_id: FOLDER_ID,
+    const created = await tool(handler, "create_program", { name: "Push Pull" });
+    expect(created.isError).toBe(false);
+    const programId = (created.data.created as { id: string }).id;
+    expect(await store.get(SUB_A, "ROUTINE_FOLDER", programId)).toMatchObject({
+      name: "Push Pull",
+      sort_order: 2000, // after Upper/Lower (1000)
     });
-    expect(isError).toBe(false);
-    const created = data.created as Record<string, unknown>;
-    expect(created).toMatchObject({
-      type: "ROUTINE",
-      name: "Push Day",
-      folder_id: FOLDER_ID,
-      created_at: NOW,
-      updated_at: NOW,
-      deleted_at: null,
-      // After Upper A (no sort_order, so 0) in the same folder.
-      sort_order: 1000,
-    });
-    expect(created).not.toHaveProperty("notes");
 
-    const stored = await store.get(SUB_A, "ROUTINE", created.id as string);
-    expect(stored).toMatchObject({
+    const push = await tool(handler, "create_workout", { ...PUSH, program_id: programId });
+    expect(push.isError).toBe(false);
+    expect(push.data.created).toMatchObject({ name: "Push Day", program_id: programId });
+    const pull = await tool(handler, "create_workout", {
+      name: "Pull Day",
+      program_id: programId,
+      exercises: [
+        { exercise_id: "builtin:barbell-row", sets: [{ target_reps_min: 8 }] },
+        { exercise_id: "builtin:pull-up", sets: [{}, {}] },
+      ],
+    });
+    expect(pull.isError).toBe(false);
+
+    const pushId = (push.data.created as { id: string }).id;
+    expect(await store.get(SUB_A, "ROUTINE", pushId)).toMatchObject({
+      type: "ROUTINE",
+      folder_id: programId,
+      created_at: NOW,
+      deleted_at: null,
+      sort_order: 1000,
       exercises: [
         {
           exercise_id: "builtin:barbell-bench-press",
@@ -526,78 +570,134 @@ describe("write tools", () => {
             { set_type: "normal", target_reps_min: 6, target_reps_max: 8 },
           ],
         },
+        {
+          exercise_id: "builtin:barbell-overhead-press",
+          sets: [{ set_type: "normal", target_reps_min: 8 }],
+        },
       ],
     });
-    // Same feed /v1/sync pulls from: the app gets it on its next sync.
+
+    const list = await tool(handler, "list_programs");
+    const pp = (list.data.programs as { name: string; workouts: { name: string }[] }[]).find(
+      (p) => p.name === "Push Pull",
+    );
+    expect(pp?.workouts.map((w) => w.name)).toEqual(["Push Day", "Pull Day"]);
+
+    // Same feed /v1/sync pulls from: the app gets them on its next sync.
     const feed = await store.pull(SUB_A, { after: "", before: "9999", limit: 100 });
-    expect(feed.rows.map((r) => r.entity.id)).toContain(created.id);
+    expect(feed.rows.map((r) => r.entity.id)).toEqual(expect.arrayContaining([programId, pushId]));
   });
 
-  it("create_routine rejects unknown exercises and folders without writing", async () => {
+  it("create_workout rejects unknown exercises and programs without writing", async () => {
     const { store, handler } = setup();
     await seed(store);
     const before = store.rows.size;
-    const bad = await tool(handler, "create_routine", {
+    const bad = await tool(handler, "create_workout", {
       name: "X",
       exercises: [{ exercise_id: "builtin:made-up-lift", sets: [{}] }],
     });
     expect(bad.isError).toBe(true);
     expect(bad.text).toContain("builtin:made-up-lift");
-    const noFolder = await tool(handler, "create_routine", {
+    const noProgram = await tool(handler, "create_workout", {
       ...PUSH,
-      folder_id: "99999999-9999-4999-8999-999999999999",
+      program_id: "99999999-9999-4999-8999-999999999999",
     });
-    expect(noFolder.isError).toBe(true);
+    expect(noProgram.isError).toBe(true);
     expect(store.rows.size).toBe(before);
   });
 
-  it("update_routine changes only what it's given, with a later updated_at", async () => {
+  it("update_workout changes only what it's given, with a later updated_at", async () => {
     const { store, handler } = setup();
     await seed(store);
-    const { data, isError } = await tool(handler, "update_routine", {
-      routine_id: ROUTINE_ID,
+    const { data, isError } = await tool(handler, "update_workout", {
+      workout_id: ROUTINE_ID,
       name: "Upper A (heavy)",
       notes: "Go heavy",
-      folder_id: null,
+      program_id: null,
     });
     expect(isError).toBe(false);
     const updated = data.updated as Record<string, unknown>;
     expect(updated).toMatchObject({ name: "Upper A (heavy)", notes: "Go heavy", updated_at: NOW });
-    expect(updated).not.toHaveProperty("folder_id");
+    expect(updated).not.toHaveProperty("program_id");
     expect((updated.exercises as unknown[]).length).toBe(2);
 
-    const cleared = await tool(handler, "update_routine", { routine_id: ROUTINE_ID, notes: null });
+    const cleared = await tool(handler, "update_workout", { workout_id: ROUTINE_ID, notes: null });
     // Same clock: the write still lands, 1 ms later, so last-writer-wins keeps it.
     expect(cleared.data.updated).toMatchObject({ updated_at: "2026-11-17T12:00:00.001Z" });
     expect(cleared.data.updated).not.toHaveProperty("notes");
   });
 
-  it("update_routine replaces the exercise list", async () => {
+  it("update_workout replaces the exercise list and can move it to a program", async () => {
     const { store, handler } = setup();
     await seed(store);
-    await tool(handler, "update_routine", { routine_id: ROUTINE_ID, exercises: PUSH.exercises });
+    const created = await tool(handler, "create_program", { name: "Other" });
+    const otherId = (created.data.created as { id: string }).id;
+    await tool(handler, "update_workout", {
+      workout_id: ROUTINE_ID,
+      exercises: PUSH.exercises,
+      program_id: otherId,
+    });
     const stored = (await store.get(SUB_A, "ROUTINE", ROUTINE_ID)) as unknown as {
+      folder_id: string;
       exercises: { exercise_id: string }[];
     };
-    expect(stored.exercises.map((e) => e.exercise_id)).toEqual(["builtin:barbell-bench-press"]);
+    expect(stored.folder_id).toBe(otherId);
+    expect(stored.exercises.map((e) => e.exercise_id)).toEqual([
+      "builtin:barbell-bench-press",
+      "builtin:barbell-overhead-press",
+    ]);
   });
 
-  it("delete_routine leaves a tombstone that syncs", async () => {
+  it("delete_workout leaves a tombstone that syncs", async () => {
     const { store, handler } = setup();
     await seed(store);
-    const { isError } = await tool(handler, "delete_routine", { routine_id: ROUTINE_ID });
+    const { isError } = await tool(handler, "delete_workout", { workout_id: ROUTINE_ID });
     expect(isError).toBe(false);
     expect(await store.get(SUB_A, "ROUTINE", ROUTINE_ID)).toMatchObject({ deleted_at: NOW });
-    const list = await tool(handler, "list_routines");
-    expect(list.data).toEqual({
-      folders: [{ id: FOLDER_ID, name: "Upper/Lower", routines: [] }],
-      unfiled: [],
-    });
-    const again = await tool(handler, "delete_routine", { routine_id: ROUTINE_ID });
+    const list = await tool(handler, "list_programs");
+    expect((list.data.programs as { workouts: unknown[] }[])[0]?.workouts).toEqual([]);
+    const again = await tool(handler, "delete_workout", { workout_id: ROUTINE_ID });
     expect(again.isError).toBe(true);
   });
 
-  it("create_custom_exercise adds one, refuses duplicates, and it can be used in a routine", async () => {
+  it("update_program renames; delete_program keeps its workouts unless asked", async () => {
+    const { store, handler } = setup();
+    await seed(store);
+    const renamed = await tool(handler, "update_program", {
+      program_id: FOLDER_ID,
+      name: "Upper Lower",
+      notes: "4 days",
+    });
+    expect(renamed.data.updated).toMatchObject({ name: "Upper Lower", notes: "4 days" });
+
+    const del = await tool(handler, "delete_program", { program_id: FOLDER_ID });
+    expect(del.data).toMatchObject({ workouts_kept_without_program: ["Upper A"] });
+    // Renamed at NOW a moment ago, so the delete is stamped 1 ms later.
+    expect(await store.get(SUB_A, "ROUTINE_FOLDER", FOLDER_ID)).toMatchObject({
+      deleted_at: "2026-11-17T12:00:00.001Z",
+    });
+    const kept = await store.get(SUB_A, "ROUTINE", ROUTINE_ID);
+    expect(kept).toMatchObject({ deleted_at: null });
+    expect(kept).not.toHaveProperty("folder_id");
+    const list = await tool(handler, "list_programs");
+    expect(list.data).toMatchObject({
+      programs: [],
+      workouts_without_program: [{ id: ROUTINE_ID }],
+    });
+  });
+
+  it("delete_program with delete_workouts removes them too", async () => {
+    const { store, handler } = setup();
+    await seed(store);
+    const del = await tool(handler, "delete_program", {
+      program_id: FOLDER_ID,
+      delete_workouts: true,
+    });
+    expect(del.data).toMatchObject({ workouts_deleted: ["Upper A"] });
+    expect(await store.get(SUB_A, "ROUTINE", ROUTINE_ID)).toMatchObject({ deleted_at: NOW });
+  });
+
+  it("create_custom_exercise adds one, refuses duplicates, and it can be used in a workout", async () => {
     const { store, handler } = setup();
     await seed(store);
     const { data } = await tool(handler, "create_custom_exercise", {
@@ -618,29 +718,31 @@ describe("write tools", () => {
     expect(dup.isError).toBe(true);
     expect(dup.text).toContain(created.id);
 
-    const routine = await tool(handler, "create_routine", {
+    const workout = await tool(handler, "create_workout", {
       name: "Legs",
       exercises: [{ exercise_id: created.id, sets: [{ target_reps_min: 10 }] }],
     });
-    expect(routine.isError).toBe(false);
+    expect(workout.isError).toBe(false);
   });
 
-  it("can't change another user's routine", async () => {
+  it("can't change another user's workouts or programs", async () => {
     const { store, handler } = setup();
     await seed(store, SUB_A);
     const update = await tool(
       handler,
-      "update_routine",
-      { routine_id: ROUTINE_ID, name: "Mine" },
+      "update_workout",
+      { workout_id: ROUTINE_ID, name: "Mine" },
       "token-b",
     );
     expect(update.isError).toBe(true);
-    const del = await tool(handler, "delete_routine", { routine_id: ROUTINE_ID }, "token-b");
+    const del = await tool(handler, "delete_workout", { workout_id: ROUTINE_ID }, "token-b");
     expect(del.isError).toBe(true);
+    const delProgram = await tool(handler, "delete_program", { program_id: FOLDER_ID }, "token-b");
+    expect(delProgram.isError).toBe(true);
     expect(await store.get(SUB_A, "ROUTINE", ROUTINE_ID)).toMatchObject({
       name: "Upper A",
       deleted_at: null,
     });
-    expect(await store.get(SUB_B, "ROUTINE", ROUTINE_ID)).toBeUndefined();
+    expect(await store.get(SUB_A, "ROUTINE_FOLDER", FOLDER_ID)).toMatchObject({ deleted_at: null });
   });
 });
