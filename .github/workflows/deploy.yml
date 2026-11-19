@@ -59,7 +59,7 @@ jobs:
           LAIDIR_VERSION: ${{ github.sha }}
         run: |
           pnpm build
-          for fn in api mcp; do
+          for fn in api mcp signup; do
             (cd "dist/${fn}" && zip -X -q "../${fn}.zip" index.mjs)
           done
           ls -l dist/*.zip
@@ -72,7 +72,7 @@ jobs:
 
       - name: Update function code
         run: |
-          for fn in api mcp; do
+          for fn in api mcp signup; do
             name="${FUNCTION_PREFIX}-${fn}"
             echo "::group::${name}"
             aws lambda update-function-code \
@@ -120,7 +120,7 @@ jobs:
             echo ""
             echo "| Function | Bundle |"
             echo "|---|---|"
-            for fn in api mcp; do
+            for fn in api mcp signup; do
               [[ -f "dist/${fn}.zip" ]] && echo "| \`${FUNCTION_PREFIX}-${fn}\` | $(stat -c %s "dist/${fn}.zip") bytes |"
             done
             echo ""
