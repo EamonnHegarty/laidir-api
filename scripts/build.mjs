@@ -5,7 +5,7 @@ import { rmSync, statSync } from "node:fs";
 import { build } from "esbuild";
 
 // Size guard rails per bundle (unminified). mcp carries the MCP SDK and zod (~1.5 MB).
-const FUNCTIONS = { api: 1_000_000, mcp: 2_000_000 };
+const FUNCTIONS = { api: 1_000_000, mcp: 2_000_000, signup: 200_000 };
 
 function gitSha() {
   try {
